@@ -17,6 +17,31 @@ vi.mock("next/server", () => ({
   },
 }));
 
+// Toggleable wrapper around the automatic follow-up task service so one test
+// can prove that a task-creation failure never removes the qualification.
+// Normal behavior delegates to the real implementation.
+const { autoTaskControl } = vi.hoisted(() => ({
+  autoTaskControl: { shouldFail: false },
+}));
+
+vi.mock("@/server/services/auto-follow-up-task", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/server/services/auto-follow-up-task")
+    >();
+  return {
+    ...actual,
+    createAutomaticFollowUpTaskIfNeeded: async (
+      params: Parameters<typeof actual.createAutomaticFollowUpTaskIfNeeded>[0],
+    ) => {
+      if (autoTaskControl.shouldFail) {
+        throw new Error("simulated automatic follow-up task failure");
+      }
+      return actual.createAutomaticFollowUpTaskIfNeeded(params);
+    },
+  };
+});
+
 const testEmail = "tenant-isolation-test@example.com";
 const secondOrgSlug = "isolation-test-org";
 
@@ -487,6 +512,256 @@ describe("automatic qualification on public submission (live database)", () => {
       where: { leadId: successLeadId, organizationId: secondOrganizationId },
     });
     expect(crossTenant).toBe(0);
+  });
+});
+
+describe("automatic follow-up tasks (live database)", () => {
+  const HOUR_MS = 60 * 60 * 1000;
+
+  async function createQualifiableLead(overrides: {
+    name: string;
+    message?: string;
+    timeline?: string | null;
+    financingStatus?: string | null;
+    budgetMin?: number | null;
+    budgetMax?: number | null;
+  }): Promise<string> {
+    const lead = await prisma.lead.create({
+      data: {
+        organizationId: secondOrganizationId,
+        name: overrides.name,
+        email: `${overrides.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}@auto-task.test`,
+        inquiryType: "BUY",
+        preferredLocation: "Auto Task City",
+        message: overrides.message ?? "Automatic follow-up task test lead.",
+        timeline: overrides.timeline ?? null,
+        financingStatus: overrides.financingStatus ?? null,
+        budgetMin: overrides.budgetMin ?? null,
+        budgetMax: overrides.budgetMax ?? null,
+        status: "NEW",
+      },
+      select: { id: true },
+    });
+    return lead.id;
+  }
+
+  async function qualify(leadId: string) {
+    const { qualifyLeadForOrganization } = await import(
+      "@/server/ai/qualify-lead"
+    );
+    return qualifyLeadForOrganization({
+      organizationId: secondOrganizationId,
+      leadId,
+      actorUserId: null,
+    });
+  }
+
+  it("creates exactly one automatic task for a HIGH-priority qualification", async () => {
+    const leadId = await createQualifiableLead({
+      name: "High Priority Lead",
+      timeline: "ONE_TO_THREE_MONTHS",
+      financingStatus: "CASH",
+    });
+
+    const outcome = await qualify(leadId);
+    expect(outcome.status).toBe("succeeded");
+
+    const qualification = await prisma.leadQualification.findFirst({
+      where: { leadId, organizationId: secondOrganizationId },
+    });
+    expect(qualification?.priority).toBe("HIGH");
+
+    const tasks = await prisma.followUpTask.findMany({
+      where: { leadId, organizationId: secondOrganizationId },
+    });
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].title).toBe("Follow up with High Priority Lead");
+    expect(tasks[0].description).toBe(qualification!.recommendedAction);
+    // Due within 24 hours of now.
+    expect(tasks[0].dueDate.getTime()).toBeGreaterThan(Date.now());
+    expect(tasks[0].dueDate.getTime()).toBeLessThanOrEqual(
+      Date.now() + 24 * HOUR_MS + 5000,
+    );
+
+    const marker = await prisma.activity.findFirst({
+      where: {
+        leadId,
+        organizationId: secondOrganizationId,
+        type: "AUTO_FOLLOW_UP_CREATED",
+      },
+      select: { actorUserId: true, message: true },
+    });
+    expect(marker).not.toBeNull();
+    expect(marker?.actorUserId).toBeNull();
+    expect(marker?.message).toContain("HIGH-priority");
+  });
+
+  it("creates exactly one sooner task for an URGENT-priority qualification", async () => {
+    const leadId = await createQualifiableLead({
+      name: "Urgent Priority Lead",
+      timeline: "ASAP",
+      financingStatus: "CASH",
+      budgetMin: 600_000,
+      budgetMax: 900_000,
+    });
+
+    const outcome = await qualify(leadId);
+    expect(outcome.status).toBe("succeeded");
+
+    const qualification = await prisma.leadQualification.findFirst({
+      where: { leadId, organizationId: secondOrganizationId },
+    });
+    expect(qualification?.priority).toBe("URGENT");
+
+    const tasks = await prisma.followUpTask.findMany({ where: { leadId } });
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].title).toBe("Urgent follow-up with Urgent Priority Lead");
+    // Due much sooner than the HIGH window (2h vs 24h).
+    const hoursUntilDue = (tasks[0].dueDate.getTime() - Date.now()) / HOUR_MS;
+    expect(hoursUntilDue).toBeGreaterThan(0);
+    expect(hoursUntilDue).toBeLessThanOrEqual(2.01);
+  });
+
+  it("creates no automatic task for LOW or MEDIUM priority", async () => {
+    const lowLeadId = await createQualifiableLead({
+      name: "Low Priority Lead",
+      timeline: "JUST_BROWSING",
+    });
+    const mediumLeadId = await createQualifiableLead({
+      name: "Medium Priority Lead",
+      timeline: "ONE_TO_THREE_MONTHS",
+    });
+
+    expect((await qualify(lowLeadId)).status).toBe("succeeded");
+    expect((await qualify(mediumLeadId)).status).toBe("succeeded");
+
+    const lowQualification = await prisma.leadQualification.findFirst({
+      where: { leadId: lowLeadId },
+    });
+    expect(lowQualification?.priority).toBe("LOW");
+    const mediumQualification = await prisma.leadQualification.findFirst({
+      where: { leadId: mediumLeadId },
+    });
+    expect(mediumQualification?.priority).toBe("MEDIUM");
+
+    expect(
+      await prisma.followUpTask.count({ where: { leadId: lowLeadId } }),
+    ).toBe(0);
+    expect(
+      await prisma.followUpTask.count({ where: { leadId: mediumLeadId } }),
+    ).toBe(0);
+  });
+
+  it("does not duplicate automatic tasks on repeated qualification", async () => {
+    const leadId = await createQualifiableLead({
+      name: "Repeat High Lead",
+      timeline: "ONE_TO_THREE_MONTHS",
+      financingStatus: "CASH",
+    });
+
+    expect((await qualify(leadId)).status).toBe("succeeded");
+    expect((await qualify(leadId)).status).toBe("succeeded");
+
+    // Two qualifications may exist, but only one automatic task and marker.
+    expect(await prisma.followUpTask.count({ where: { leadId } })).toBe(1);
+    expect(
+      await prisma.activity.count({
+        where: { leadId, type: "AUTO_FOLLOW_UP_CREATED" },
+      }),
+    ).toBe(1);
+  });
+
+  it("creates exactly one automatic task under concurrent execution", async () => {
+    const leadId = await createQualifiableLead({
+      name: "Concurrent High Lead",
+      timeline: "ONE_TO_THREE_MONTHS",
+      financingStatus: "CASH",
+    });
+
+    const { createAutomaticFollowUpTaskIfNeeded } = await import(
+      "@/server/services/auto-follow-up-task"
+    );
+
+    // Fire several automatic creations for the same organization + lead at
+    // once. This is the check-then-create race the SERIALIZABLE transaction
+    // is meant to close.
+    const outcomes = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        createAutomaticFollowUpTaskIfNeeded({
+          organizationId: secondOrganizationId,
+          leadId,
+          priority: "HIGH",
+          recommendedAction: "Call immediately.",
+        }),
+      ),
+    );
+
+    expect(
+      await prisma.followUpTask.count({
+        where: { leadId, organizationId: secondOrganizationId },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.activity.count({
+        where: {
+          leadId,
+          organizationId: secondOrganizationId,
+          type: "AUTO_FOLLOW_UP_CREATED",
+        },
+      }),
+    ).toBe(1);
+    // Exactly one caller actually created the task; the rest observed it.
+    expect(outcomes.filter((outcome) => outcome.created)).toHaveLength(1);
+  });
+
+  it("cannot create an automatic task across tenants", async () => {
+    const foreignLead = await prisma.lead.findFirst({
+      where: { organizationId },
+      select: { id: true },
+    });
+    expect(foreignLead).not.toBeNull();
+
+    const { createAutomaticFollowUpTaskIfNeeded } = await import(
+      "@/server/services/auto-follow-up-task"
+    );
+
+    const outcome = await createAutomaticFollowUpTaskIfNeeded({
+      organizationId: secondOrganizationId,
+      leadId: foreignLead!.id,
+      priority: "URGENT",
+      recommendedAction: "Should never be written.",
+    });
+    expect(outcome.created).toBe(false);
+
+    expect(
+      await prisma.followUpTask.count({
+        where: { leadId: foreignLead!.id, organizationId: secondOrganizationId },
+      }),
+    ).toBe(0);
+  });
+
+  it("keeps the qualification when automatic task creation fails", async () => {
+    const leadId = await createQualifiableLead({
+      name: "Task Failure Lead",
+      timeline: "ONE_TO_THREE_MONTHS",
+      financingStatus: "CASH",
+    });
+
+    autoTaskControl.shouldFail = true;
+    try {
+      const outcome = await qualify(leadId);
+      expect(outcome.status).toBe("succeeded");
+
+      // The successful qualification survives the task failure.
+      expect(
+        await prisma.leadQualification.count({
+          where: { leadId, organizationId: secondOrganizationId },
+        }),
+      ).toBe(1);
+      expect(await prisma.followUpTask.count({ where: { leadId } })).toBe(0);
+    } finally {
+      autoTaskControl.shouldFail = false;
+    }
   });
 });
 

@@ -10,17 +10,16 @@ Workspace-specific public lead
 → persistence
 → successful visitor response
 → automatic AI qualification
-→ lead score
-→ priority
-→ intent
-→ recommended next action
-→ draft follow-up
-→ human review
-→ dashboard ranking
+→ lead score / priority / intent / recommended next action / draft reply
+→ HIGH / URGENT lead → automatic follow-up task
+→ human review and action
+→ dashboard ranking and task workflow
 → lead status update
 
 AI qualification also remains available manually from the lead detail page,
 which is the fallback whenever the provider is unavailable or rate limited.
+High-value leads (HIGH / URGENT) automatically receive one follow-up task so
+they appear in the task workflow without the agent remembering to create one.
 
 ## BUSINESS PROBLEM
 
@@ -179,6 +178,21 @@ qualification is recorded in the activity timeline, and the lead detail page
 shows whether qualification is pending or has failed with retry available.
 HTTP 429 retries are bounded (at most one retry, `Retry-After` respected) so a
 free provider quota is never burned.
+
+### Automatic Follow-Up Tasks
+
+When qualification succeeds with HIGH or URGENT priority, exactly one follow-up
+task is created automatically and appears in `/tasks` and on the lead detail
+page, ready for the agent to complete or reopen.
+
+- HIGH: due in 24 hours, titled `Follow up with <lead name>`
+- URGENT: due in 2 hours, titled `Urgent follow-up with <lead name>`
+- the description uses the AI recommended action
+- LOW / MEDIUM create no automatic task
+- server time is used consistently; no client timezone system
+- one automatic task per lead (repeated qualification cannot duplicate it)
+- a task-creation failure never removes the qualification or the lead, and
+  manual task creation stays available
 
 ### Human Review
 
@@ -424,10 +438,10 @@ Implemented and verified through Phase 7 (dashboard insights) plus automatic AI
 qualification on public lead capture: Next.js 16 + Prisma 7 foundation,
 credentials authentication, self-service workspace provisioning on sign-up,
 organization/tenant isolation, workspace-specific public lead capture
-(`/lead/[organizationSlug]`) with automatic post-response AI qualification,
-lead CRM (list/detail/status/notes/tasks), AI qualification with mock provider
-+ human review, dashboard metrics and contact-first ranking, and an 83-test
-baseline.
+(`/lead/[organizationSlug]`) with automatic post-response AI qualification and
+automatic follow-up tasks for HIGH/URGENT leads, lead CRM
+(list/detail/status/notes/tasks), AI qualification with mock provider + human
+review, dashboard metrics and contact-first ranking, and a 95-test baseline.
 
 The initial migration is applied and verified against the configured PostgreSQL/Neon database, and the seed has been run. Verification covers: migration state in sync, idempotent seed, authentication round trip, organization/tenant isolation and cross-tenant rejection, public lead persistence, lead list/detail rendering from persisted records, status/notes/follow-up-task/activity mutations, and mock AI qualification success, failure recovery, and human review.
 

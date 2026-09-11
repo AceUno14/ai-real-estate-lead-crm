@@ -6,6 +6,7 @@ import {
   getQualificationProvider,
   AiProviderError,
 } from "@/server/ai/provider-factory";
+import { createAutomaticFollowUpTaskIfNeeded } from "@/server/services/auto-follow-up-task";
 
 /**
  * Lead qualification workflow (TASKS.md T054 / T056).
@@ -24,7 +25,9 @@ import {
  *
  * Flow (core): load lead scoped by organizationId → build qualification input
  * from approved fields → call the configured provider → Zod-validated result
- * → persist LeadQualification with provider/model metadata → Activity entry.
+ * → persist LeadQualification with provider/model metadata → Activity entry
+ * → for HIGH/URGENT results, create one automatic follow-up task (T057,
+ * best-effort; a task failure never invalidates the qualification).
  *
  * Failure handling (D-025): the lead is never modified or deleted by
  * qualification. Failures are recorded as an Activity entry and can be
@@ -114,6 +117,24 @@ export async function qualifyLeadForOrganization({
         message: `AI qualification completed — score ${result.score}, priority ${result.priority}`,
       },
     });
+
+    // High-value leads get one automatic follow-up task (T057). This is
+    // best-effort: the qualification is already safely persisted, so a task
+    // failure must never turn a successful qualification into a failure. The
+    // rule uses only the server-trusted result, never client input.
+    if (result.priority === "HIGH" || result.priority === "URGENT") {
+      try {
+        await createAutomaticFollowUpTaskIfNeeded({
+          organizationId,
+          leadId: lead.id,
+          priority: result.priority,
+          recommendedAction: result.recommendedAction,
+        });
+      } catch {
+        // Swallow: the qualification, lead, and existing activities are
+        // intact and manual task creation remains available.
+      }
+    }
 
     return { status: "succeeded" };
   } catch (error) {

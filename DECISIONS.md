@@ -641,3 +641,79 @@ Not chosen:
 - an external queue or paid background service for the MVP
 - unbounded or aggressive retries against a rate-limited provider
 - accepting a client-supplied `organizationId` for the automatic run
+
+## D-029 — Automatic Follow-Up Task for High-Value Leads
+
+Status: Accepted
+
+Decision:
+
+When AI qualification succeeds with HIGH or URGENT priority, the system creates
+exactly one automatic follow-up task so the lead enters the task workflow
+immediately.
+
+```
+public lead persisted
+→ automatic AI qualification succeeds
+→ priority is HIGH or URGENT
+→ create one follow-up task (+ AUTO_FOLLOW_UP_CREATED activity)
+→ task appears in /tasks and on the lead detail page
+→ agent completes/reopens it normally
+```
+
+Rules:
+
+- the rule runs only after a LeadQualification is persisted; it never runs
+  before a successful qualification
+- LOW and MEDIUM priority create no automatic task
+- the rule uses only the server-trusted, Zod-validated qualification result;
+  client-supplied priority or recommended action is never used
+- the task uses the same trusted `organizationId` and `leadId` as the
+  qualification
+- system-created tasks use `actorUserId = null` in their activity
+
+Due dates (server time):
+
+- the rule uses server time consistently; no client timezone system is
+  introduced for the MVP
+- HIGH is due 24 hours after creation
+- URGENT is due 2 hours after creation (clearly sooner than HIGH)
+
+Title / description:
+
+- HIGH: `Follow up with <lead name>`
+- URGENT: `Urgent follow-up with <lead name>`
+- description uses the AI `recommendedAction` when available, with a sensible
+  priority-specific fallback otherwise
+
+Idempotency:
+
+- one automatic task per lead
+- reuse the existing Activity ledger: an `AUTO_FOLLOW_UP_CREATED` activity is
+  written together with the task and acts as the marker
+- the marker check, the task write, and the marker write execute in a single
+  SERIALIZABLE transaction, so PostgreSQL's serialization (SSI) aborts a
+  concurrent duplicate instead of allowing two tasks; the aborted attempt is
+  retried a very small, bounded number of times (3) and then observes the
+  committed marker and creates nothing
+- no in-memory lock is used, because Vercel/serverless runs multiple instances
+- manual requalification does not create another automatic task
+
+Failure isolation:
+
+- task creation is best-effort; a failure never removes or corrupts the lead,
+  the successful qualification, or existing activities
+- manual task creation remains available
+
+Reason:
+
+High-value leads should not wait for an agent to remember to create a
+follow-up. Reusing `FollowUpTask` and the existing `Activity` model keeps the
+change small and avoids a migration.
+
+Not chosen:
+
+- creating tasks before qualification succeeds
+- creating automatic tasks for LOW / MEDIUM leads
+- a schema migration or new column just to flag automatic tasks
+- a client-timezone scheduling system for the MVP

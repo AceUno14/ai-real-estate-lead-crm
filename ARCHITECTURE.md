@@ -298,6 +298,8 @@ Server-resolved inputs only
 → Validate with Zod
 → Persist LeadQualification (with provider/model metadata)
 → Create QUALIFICATION_GENERATED Activity with actorUserId
+→ HIGH / URGENT only: create one automatic follow-up task
+   (+ AUTO_FOLLOW_UP_CREATED Activity, best-effort — D-029)
 → Return outcome
 
 `organizationId` must always come from trusted server code (an authenticated
@@ -327,6 +329,30 @@ If the AI fails:
 → Leave the manual "Run AI qualification" button available
 → Never expose provider internals or secrets to the visitor
 → Do not break the CRM
+
+## AUTOMATIC FOLLOW-UP TASKS
+
+High-value leads get a follow-up task automatically (D-029):
+
+```
+qualification succeeded
+→ priority HIGH or URGENT
+→ createFollowUpTask (organizationId + leadId from the qualification)
+→ AUTO_FOLLOW_UP_CREATED Activity
+→ /tasks and lead detail show the task
+```
+
+- LOW / MEDIUM priority create nothing
+- one automatic task per lead; the `AUTO_FOLLOW_UP_CREATED` activity is written
+  in the same transaction and acts as the idempotency marker
+- concurrency safety: the marker check, the task write, and the marker write run
+  in one SERIALIZABLE transaction, so two concurrent runs cannot both observe
+  "no marker" — PostgreSQL's SSI aborts one and a bounded retry (3 attempts)
+  then sees the committed marker. No in-memory lock is used (serverless has
+  multiple instances), and no schema migration is required
+- due dates use server time: HIGH in 24 hours, URGENT in 2 hours
+- a task-creation failure never removes the qualification, lead, or activities
+- the rule uses only the server-trusted qualification result, never client input
 
 ## AI PROVIDER ABSTRACTION
 
@@ -501,6 +527,7 @@ Examples:
 - qualification generated
 - qualification failed
 - qualification retried
+- automatic follow-up task created
 - AI draft edited
 - AI draft approved
 - AI draft rejected

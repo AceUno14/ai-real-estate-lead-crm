@@ -571,6 +571,38 @@ Security:
 - the core scopes the lead by `organizationId + leadId`
 - no secrets or provider internals are exposed
 
+## T057 — Automatic Follow-Up Task for High-Value Leads
+
+Status: [x]
+
+Progress note: after a LeadQualification is successfully persisted, HIGH and
+URGENT results create exactly one automatic follow-up task (D-029). The rule
+lives in `src/server/services/auto-follow-up-task.ts` — a pure
+`planAutomaticFollowUpTask` plus an idempotent, organization-scoped
+`createAutomaticFollowUpTaskIfNeeded` called from the qualification core after
+persistence. LOW/MEDIUM create nothing. Due dates use server time: HIGH is due
+in 24 hours, URGENT in 2 hours. Idempotency reuses the existing Activity ledger
+(`AUTO_FOLLOW_UP_CREATED`, written in the same transaction as the task), so
+repeated/racing qualification runs cannot duplicate the task. System rows use
+`actorUserId = null`. Task creation is best-effort: a failure never removes the
+qualification, lead, or activities, and manual task creation stays available.
+No schema migration was required.
+
+Scope:
+
+- pure priority rule + due-date offsets
+- idempotent automatic task creation after successful qualification
+- `AUTO_FOLLOW_UP_CREATED` activity (system actor)
+- best-effort failure isolation
+- tests + documentation
+
+Rules:
+
+- run only after a successful qualification is persisted
+- use only the server-trusted, Zod-validated qualification result
+- task links the same trusted `organizationId` and `leadId`
+- no client-supplied priority or recommended action
+
 # PHASE 7 — DASHBOARD INSIGHTS
 
 ## T060 — Dashboard Metrics
@@ -827,6 +859,17 @@ Verified this session (T056 — automatic qualification after public lead captur
   write nothing
 - manual authenticated qualification still works; human review is unchanged
 - HTTP 429 retries are bounded and respect `Retry-After`
+
+Verified this session (T057 — automatic follow-up task for high-value leads):
+
+- HIGH and URGENT qualifications each create exactly one automatic task in the
+  same organization/lead as the qualification
+- LOW and MEDIUM create none
+- HIGH is due within 24 hours; URGENT is due sooner
+- repeated qualification does not duplicate the automatic task or its marker
+- cross-tenant task creation is impossible
+- a task-creation failure leaves the qualification, lead, and activities intact
+- manual create / complete / reopen continue to work; existing tests still pass
 
 Note: the application is deployed to Vercel with a Neon production database and
 Groq as the runtime AI provider. That state is user-reported; T080–T082 remain

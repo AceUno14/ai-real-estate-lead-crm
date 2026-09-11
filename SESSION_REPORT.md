@@ -582,3 +582,254 @@ Deploy, then submit a test inquiry at `/lead/esmael-realty` and confirm the
 lead detail page shows an AI qualification without clicking the manual button.
 If Groq is rate limited, confirm the activity timeline records the failure and
 the manual "Run AI qualification" button still works.
+
+---
+
+# FOLLOW-UP SESSION — AUTOMATIC FOLLOW-UP TASK FOR HIGH-VALUE LEADS
+
+Session date: 2026-09-12
+
+Primary coding AI: DeepSeek V4 Flash
+
+Runtime AI provider: `mock` locally; Groq via the openai-compatible provider in
+production (unchanged by this task).
+
+## OBJECTIVE
+
+When AI qualification identifies a high-value lead, create a useful follow-up
+task automatically so it enters the /tasks workflow without the agent having to
+remember. Never create a task before qualification succeeds.
+
+## NEW CHAIN (recorded as D-029)
+
+```
+workspace-specific public lead
+→ persistence
+→ automatic AI qualification
+→ HIGH / URGENT lead
+→ automatic follow-up task (+ AUTO_FOLLOW_UP_CREATED activity)
+→ human action
+→ dashboard / task workflow
+```
+
+## AUTOMATION RULE
+
+A pure rule lives in `src/server/services/auto-follow-up-task.ts`:
+
+- HIGH or URGENT → one task; LOW or MEDIUM → nothing
+- HIGH title `Follow up with <lead name>`; URGENT title
+  `Urgent follow-up with <lead name>`
+- description uses the AI `recommendedAction` when available, with a
+  priority-specific fallback otherwise
+
+The rule runs from the trusted qualification core **after** the
+`LeadQualification` row and its `QUALIFICATION_GENERATED` activity are written.
+It uses only the server-trusted, Zod-validated qualification result — never
+client-supplied priority or recommended action.
+
+## DUE-DATE RULE
+
+Server time is used consistently; no client timezone system was introduced.
+
+- HIGH: due in 24 hours
+- URGENT: due in 2 hours (clearly sooner than HIGH)
+
+The offsets are exported (`AUTOMATIC_TASK_DUE_HOURS`) and covered by a pure
+unit test.
+
+## IDEMPOTENCY
+
+One automatic task per lead, using the existing `Activity` ledger:
+
+- an `AUTO_FOLLOW_UP_CREATED` activity is written in the **same transaction**
+  as the task and acts as the marker
+- before creating, the helper checks for that marker and skips when present
+- repeated or racing qualification runs therefore cannot duplicate the task
+- manual requalification does not create a second automatic task
+- no schema migration was needed (reuses `FollowUpTask` and `Activity.metadata`)
+
+## FAILURE BEHAVIOR
+
+Task creation is best-effort and isolated in its own try/catch:
+
+- a task-creation failure never removes or corrupts the lead, the successful
+  qualification, or existing activities
+- manual task creation stays available
+- a successful qualification is never downgraded to a failure because the task
+  could not be created
+
+## SECURITY
+
+- the task uses the same trusted `organizationId` and `leadId` as the
+  qualification
+- the helper loads the lead by `organizationId + leadId`, so a cross-tenant
+  call behaves like a missing lead and writes nothing
+- system-created tasks/activities use `actorUserId = null`
+- no secrets or provider internals are exposed
+
+## UX
+
+No redesign. Automatic tasks appear naturally in the existing `/tasks` page and
+on the lead detail page, where the agent can complete/reopen them as before.
+The activity timeline records `Automatic follow-up task created for
+<PRIORITY>-priority lead`. No schema/UI flag was added purely for presentation.
+
+## TESTS
+
+New unit (`src/server/services/auto-follow-up-task.test.ts`, 6):
+
+- HIGH plan is due within 24 hours
+- URGENT plan is due sooner than HIGH and titled as urgent
+- LOW and MEDIUM plan nothing
+- fallback description when no recommended action
+- generic subject for a blank lead name
+
+New live (`src/server/actions/integration.live.test.ts`, 6):
+
+- HIGH qualification creates exactly one task, org/lead correct, due within 24h,
+  with a null-actor marker activity
+- URGENT qualification creates exactly one sooner task
+- LOW and MEDIUM create nothing
+- repeated qualification does not duplicate the task or marker
+- cross-tenant task creation is impossible
+- a task-creation failure keeps the qualification and creates no task
+  (via a toggleable mock around the service)
+
+Existing manual create/complete/reopen, automatic qualification, human review,
+and public lead routing tests all still pass.
+
+## VERIFICATION
+
+```
+npm run typecheck   # clean
+npm run lint        # clean
+npm test            # 95 passed / 95 (11 files)
+npm run build       # clean
+```
+
+## FILES CHANGED (THIS SESSION)
+
+| File | Change |
+| --- | --- |
+| `src/server/services/auto-follow-up-task.ts` | New rule + idempotent creation helper |
+| `src/server/services/auto-follow-up-task.test.ts` | New unit tests |
+| `src/server/ai/qualify-lead.ts` | Call the rule after successful qualification |
+| `src/server/actions/integration.live.test.ts` | Automatic task coverage + failure mock |
+| `DECISIONS.md` | Add D-029 |
+| `ARCHITECTURE.md` | Core flow + automatic follow-up tasks + activity example |
+| `TASKS.md` | Add T057 + verified list |
+| `README.md` | Core workflow, follow-up tasks, status |
+| `SESSION_REPORT.md` | This section |
+
+## MIGRATION REQUIRED
+
+None. The existing `FollowUpTask` model and `Activity` model (nullable
+`actorUserId`, string `type`, Json `metadata`) were sufficient.
+
+## BLOCKERS
+
+None. No destructive database operation, new credential, or architecture
+ambiguity was encountered. Deployment was not run (as instructed).
+
+## NEXT ACTION
+
+Deploy, then submit a HIGH/URGENT public inquiry at `/lead/esmael-realty` and
+confirm an automatic follow-up task appears in `/tasks` and on the lead detail
+page. Verify a LOW/MEDIUM inquiry creates no task, and that complete/reopen
+still works.
+
+---
+
+# FOLLOW-UP SESSION — CONCURRENCY HARDENING FOR AUTOMATIC FOLLOW-UP TASKS
+
+Session date: 2026-09-12
+
+Scope: Step 3 automatic follow-up task implementation only. No new features, no
+unrelated refactors, no deployment.
+
+## ROOT CAUSE
+
+The automatic follow-up task used a check-then-create pattern: the marker
+existence check ran **outside** the transaction, then the task and marker were
+written together. Under PostgreSQL's default READ COMMITTED isolation, two
+concurrent qualification executions could both observe "no marker" and both
+insert an automatic task. The documentation claimed racing runs could not
+duplicate; that claim was not actually guaranteed.
+
+This is reachable because high-value leads can be qualified concurrently (for
+example an automatic run racing a manual requalification), and serverless adds
+multiple instances.
+
+## FIX
+
+Move the marker check **inside** the write transaction and run that transaction
+at `SERIALIZABLE` isolation:
+
+- PostgreSQL SSI treats the marker read plus the marker insert as a
+  read-write conflict, so a concurrent duplicate is aborted (SQLSTATE 40001)
+  instead of committing
+- the aborted attempt is retried a very small, bounded number of times
+  (`MAX_SERIALIZABLE_RETRIES = 3`); on retry it observes the committed marker
+  and returns `{ created: false }`
+
+## CONCURRENCY STRATEGY
+
+Single `prisma.$transaction(..., { isolationLevel: Serializable })` wrapping:
+marker `findFirst` → `followUpTask.create` → marker `activity.create`. A
+Prisma `P2034` (write conflict/deadlock) or a raw SQLSTATE `40001` is treated
+as retryable; any other error propagates.
+
+Not used:
+
+- in-memory locks (serverless has multiple instances)
+- a new unique constraint / migration (not needed for this guarantee)
+
+The caller (`qualifyLeadForOrganization`) still wraps the call in its own
+try/catch, so a task failure — including a retry-exhausted serialization
+conflict — never removes the successful qualification, lead, or activities.
+
+## FILES CHANGED (THIS SESSION)
+
+| File | Change |
+| --- | --- |
+| `src/server/services/auto-follow-up-task.ts` | Marker check moved inside a SERIALIZABLE transaction + bounded retry |
+| `src/server/actions/integration.live.test.ts` | New concurrent-execution test |
+| `DECISIONS.md` | D-029 idempotency section explains SSI + retry |
+| `ARCHITECTURE.md` | Concurrency note in automatic follow-up tasks |
+| `SESSION_REPORT.md` | This section |
+
+## TESTS
+
+New live test (kept the existing sequential idempotency test):
+
+- fires 5 concurrent `createAutomaticFollowUpTaskIfNeeded` calls for the same
+  organization + lead
+- asserts exactly **one** `FollowUpTask` and exactly **one**
+  `AUTO_FOLLOW_UP_CREATED` activity
+- asserts exactly one caller reported `created: true`
+
+Existing automatic-task, manual task, automatic qualification, human review,
+and public lead routing tests are unchanged and still pass.
+
+## VERIFICATION
+
+```
+npm run typecheck   # clean
+npm run lint        # clean
+npm test            # 96 passed / 96 (11 files)
+npm run build       # clean
+```
+
+## MIGRATION REQUIRED
+
+None. The concurrency guarantee comes from transaction isolation, not a schema
+change.
+
+## BLOCKERS
+
+None. Deployment was not run (as instructed).
+
+## NEXT ACTION
+
+Deploy and re-run the production smoke test for a HIGH/URGENT inquiry; confirm
+exactly one automatic follow-up task appears. No further action on this item.
