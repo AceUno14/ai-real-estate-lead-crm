@@ -568,3 +568,76 @@ Not chosen:
 
 - accepting an organization ID from the browser
 - a single global organization variable for all public submissions
+
+## D-028 — Automatic AI Qualification After Public Lead Capture
+
+Status: Accepted
+
+Decision:
+
+AI qualification runs automatically after a public lead is safely persisted.
+The visitor is told their inquiry was received before any AI call happens.
+
+```
+public submission
+→ validate workspace slug
+→ validate lead input
+→ persist Lead
+→ persist LEAD_CREATED Activity
+→ return success to the visitor
+→ (post-response) automatic AI qualification
+→ persist LeadQualification + QUALIFICATION_GENERATED activity
+→ dashboard ranking reflects the result
+```
+
+Scheduling:
+
+- automatic qualification is scheduled with Next.js `after()` from
+  `next/server`, the supported post-response API, so the visitor never waits
+  on the AI
+- no external paid queue or background service is introduced for the MVP
+- scheduling is best-effort; if it fails the submission still succeeds
+
+Qualification layers:
+
+- `qualifyLeadForOrganization({ organizationId, leadId, actorUserId })` is the
+  trusted, session-free core service. `organizationId` must be a trusted
+  server-resolved value; the lead is always loaded by `organizationId + leadId`
+- the authenticated manual flow (`src/server/actions/qualification.ts`) is the
+  manual wrapper: it resolves the session and active workspace, then calls the
+  core with the signed-in user as `actorUserId`
+- the automatic flow calls the same core with `actorUserId = null`, which the
+  existing `Activity.actorUserId` (nullable) already supports
+
+Failure behavior:
+
+- AI failure, timeout, provider outage, malformed output, or HTTP 429 never
+  fails or delays the public submission and never modifies or deletes the lead
+- a `QUALIFICATION_FAILED` activity is recorded
+- the manual "Run AI qualification" button remains available as the fallback
+
+Idempotency:
+
+- an automatic run skips when a qualification already exists for the lead, so
+  a submission cannot produce duplicate successful qualifications
+- intentional manual requalification is preserved
+
+Rate limiting:
+
+- HTTP 429 is treated as retryable with at most one bounded retry
+- `Retry-After` is respected; a wait longer than 5 seconds (or exhausted
+  retries) fails fast and records the failure
+- retries are deliberately minimal so a free quota is never burned
+
+Reason:
+
+Agents should not have to click a button to get AI value for a new lead. Doing
+it automatically after persistence keeps the visitor experience fast and keeps
+AI as an enhancement rather than a dependency (D-025).
+
+Not chosen:
+
+- blocking the public submission on the AI call
+- an external queue or paid background service for the MVP
+- unbounded or aggressive retries against a rate-limited provider
+- accepting a client-supplied `organizationId` for the automatic run

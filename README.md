@@ -6,16 +6,21 @@ The application captures property inquiries, organizes them inside a CRM, analyz
 
 ## CORE WORKFLOW
 
-Lead
-→ CRM
-→ AI qualification
+Workspace-specific public lead
+→ persistence
+→ successful visitor response
+→ automatic AI qualification
 → lead score
 → priority
 → intent
 → recommended next action
 → draft follow-up
 → human review
+→ dashboard ranking
 → lead status update
+
+AI qualification also remains available manually from the lead detail page,
+which is the fallback whenever the provider is unavailable or rate limited.
 
 ## BUSINESS PROBLEM
 
@@ -143,6 +148,11 @@ Collect:
 
 ### AI Qualification
 
+Qualification runs automatically after a public lead is safely persisted, using
+Next.js `after()` so the visitor is never kept waiting on the AI. The manual
+"Run AI qualification" button stays available and is the fallback when the
+provider fails or is rate limited.
+
 AI returns:
 
 - score from 0 to 100
@@ -162,6 +172,13 @@ Priority levels:
 - MEDIUM
 - HIGH
 - URGENT
+
+Failure handling: AI failure, timeout, provider outage, malformed output, or
+HTTP 429 never fails the lead submission and never modifies the lead. A failed
+qualification is recorded in the activity timeline, and the lead detail page
+shows whether qualification is pending or has failed with retry available.
+HTTP 429 retries are bounded (at most one retry, `Retry-After` respected) so a
+free provider quota is never burned.
 
 ### Human Review
 
@@ -403,7 +420,14 @@ Configurable provider
 
 ## CURRENT STATUS
 
-Implemented and verified through Phase 7 (dashboard insights): Next.js 16 + Prisma 7 foundation, credentials authentication, self-service workspace provisioning on sign-up, organization/tenant isolation, workspace-specific public lead capture (`/lead/[organizationSlug]`), lead CRM (list/detail/status/notes/tasks), AI qualification with mock provider + human review, dashboard metrics and contact-first ranking, and a 74-test baseline.
+Implemented and verified through Phase 7 (dashboard insights) plus automatic AI
+qualification on public lead capture: Next.js 16 + Prisma 7 foundation,
+credentials authentication, self-service workspace provisioning on sign-up,
+organization/tenant isolation, workspace-specific public lead capture
+(`/lead/[organizationSlug]`) with automatic post-response AI qualification,
+lead CRM (list/detail/status/notes/tasks), AI qualification with mock provider
++ human review, dashboard metrics and contact-first ranking, and an 83-test
+baseline.
 
 The initial migration is applied and verified against the configured PostgreSQL/Neon database, and the seed has been run. Verification covers: migration state in sync, idempotent seed, authentication round trip, organization/tenant isolation and cross-tenant rejection, public lead persistence, lead list/detail rendering from persisted records, status/notes/follow-up-task/activity mutations, and mock AI qualification success, failure recovery, and human review.
 

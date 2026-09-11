@@ -6,7 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/server/db/prisma";
 import { requireActiveOrganization } from "@/server/auth/organization";
 import { requireSessionUser } from "@/server/auth/session";
-import { qualifyLead } from "@/server/ai/qualify-lead";
+import { qualifyLeadForOrganization } from "@/server/ai/qualify-lead";
 
 /**
  * Qualification trigger + human review actions (T054/T055).
@@ -26,7 +26,17 @@ export async function runQualification(
     return { error: "Invalid request." };
   }
 
-  const outcome = await qualifyLead(leadId.data);
+  // Authenticated manual wrapper: resolve the session + active workspace
+  // server-side, then run the trusted, session-free core with the signed-in
+  // user as the actor. Tenant isolation is unchanged.
+  const user = await requireSessionUser();
+  const organization = await requireActiveOrganization();
+
+  const outcome = await qualifyLeadForOrganization({
+    organizationId: organization.id,
+    leadId: leadId.data,
+    actorUserId: user.id,
+  });
   revalidatePath(`/leads/${leadId.data}`);
 
   return outcome.status === "succeeded"

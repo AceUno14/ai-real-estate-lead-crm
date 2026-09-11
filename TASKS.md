@@ -536,6 +536,41 @@ Features:
 
 Do not send outbound messages.
 
+## T056 — Automatic Qualification After Public Lead Capture
+
+Status: [x]
+
+Progress note: public submissions now trigger AI qualification automatically
+after the lead is persisted and the visitor has already received success
+(D-028). Qualification was refactored into a session-free trusted core
+(`qualifyLeadForOrganization({ organizationId, leadId, actorUserId })`) plus
+an authenticated manual wrapper in `src/server/actions/qualification.ts`;
+the automatic path calls the same core with `actorUserId = null`. Scheduling
+uses Next.js `after()` from `next/server` (the supported post-response API),
+so the visitor never waits on the AI and no external queue was introduced.
+Failures (including HTTP 429) record a `QUALIFICATION_FAILED` activity and
+leave the lead intact and manually requalifiable. Automatic runs are
+idempotent (skip when a qualification already exists). The openai-compatible
+provider retries HTTP 429 at most once, respects `Retry-After`, and fails
+fast when the wait exceeds 5 seconds. No schema migration was required.
+
+Scope:
+
+- session-free trusted core qualification service
+- authenticated manual wrapper preserved
+- automatic post-response qualification via `after()`
+- system activity with `actorUserId = null`
+- idempotent automatic runs
+- bounded HTTP 429 handling
+- lead detail status label (pending / failed — retry available)
+- tests + documentation
+
+Security:
+
+- the public form still never supplies an `organizationId`
+- the core scopes the lead by `organizationId + leadId`
+- no secrets or provider internals are exposed
+
 # PHASE 7 — DASHBOARD INSIGHTS
 
 ## T060 — Dashboard Metrics
@@ -780,6 +815,18 @@ Verified this session (T032 — workspace-specific public lead routing):
 - a browser-supplied `organizationId` is ignored
 - unknown/malformed slugs create nothing (404 / error, no writes)
 - legacy `/lead` redirects to the configured default workspace
+
+Verified this session (T056 — automatic qualification after public lead capture):
+
+- a public submission succeeds and persists a `LeadQualification` plus a
+  `QUALIFICATION_GENERATED` activity with `actorUserId = null`
+- when AI fails the submission still succeeds, the lead is unchanged, and a
+  `QUALIFICATION_FAILED` activity is recorded
+- repeated automatic runs do not create duplicate successful qualifications
+- qualification stays scoped to the resolved workspace; cross-tenant runs
+  write nothing
+- manual authenticated qualification still works; human review is unchanged
+- HTTP 429 retries are bounded and respect `Retry-After`
 
 Note: the application is deployed to Vercel with a Neon production database and
 Groq as the runtime AI provider. That state is user-reported; T080–T082 remain

@@ -224,9 +224,16 @@ POST (server action)
 → Validate form input with Zod
 → Resolve the slug to a trusted organizationId server-side
 → Create Lead
-→ Create Activity record
-→ Trigger AI qualification
-→ Return success response
+→ Create LEAD_CREATED Activity record
+→ Return success response to the visitor
+→ Schedule automatic AI qualification with Next.js `after()`
+   (post-response; never blocks or fails the submission — D-028)
+
+Automatic qualification calls the same trusted core as the manual button, with
+`actorUserId = null`. AI success persists a `LeadQualification` plus a
+`QUALIFICATION_GENERATED` activity; AI failure (including HTTP 429, timeout,
+outage, or malformed output) records a `QUALIFICATION_FAILED` activity and
+leaves the lead intact and manually requalifiable.
 
 The browser must not be trusted to choose arbitrary organization IDs.
 
@@ -274,24 +281,51 @@ Authenticated user
 
 ## AI QUALIFICATION FLOW
 
-Server receives qualification request
-→ Resolve authenticated organization
-→ Load lead using leadId + organizationId
+Qualification is split into two layers (D-028) so the same workflow serves the
+authenticated manual button and automatic public-lead qualification.
+
+### Trusted core service (session-free)
+
+`qualifyLeadForOrganization({ organizationId, leadId, actorUserId })`
+
+Server-resolved inputs only
+→ Load lead using organizationId + leadId
 → Build qualification input
 → Build approved prompt
 → Call configured AI provider
 → Receive response
 → Parse response
 → Validate with Zod
-→ Persist LeadQualification
-→ Create Activity record
-→ Return qualification
+→ Persist LeadQualification (with provider/model metadata)
+→ Create QUALIFICATION_GENERATED Activity with actorUserId
+→ Return outcome
+
+`organizationId` must always come from trusted server code (an authenticated
+workspace, or a public workspace slug resolved server-side). `actorUserId` is
+`null` for automatic/system runs.
+
+### Authenticated manual wrapper
+
+`src/server/actions/qualification.ts`
+
+Authenticated user
+→ Resolve session
+→ Resolve active organization
+→ Call the core with organizationId + leadId + actorUserId
+
+### Automatic public qualification
+
+Public lead persisted
+→ Schedule the core with `actorUserId = null` via Next.js `after()`
+→ Runs after the visitor's success response
+→ Skips when a qualification already exists (idempotent)
 
 If the AI fails:
 
-→ Save failure state if appropriate
-→ Keep Lead intact
-→ Allow retry
+→ Persist a QUALIFICATION_FAILED Activity
+→ Keep Lead intact and unmodified
+→ Leave the manual "Run AI qualification" button available
+→ Never expose provider internals or secrets to the visitor
 → Do not break the CRM
 
 ## AI PROVIDER ABSTRACTION

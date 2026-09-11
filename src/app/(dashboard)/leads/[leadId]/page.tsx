@@ -62,6 +62,17 @@ export default async function LeadDetailPage({
     }),
   ]);
 
+  // `activities` is newest-first, so the first qualification activity tells
+  // us whether the automatic run is still pending or has already failed.
+  const latestQualificationActivity = activities.find(
+    (activity) =>
+      activity.type === "QUALIFICATION_GENERATED" ||
+      activity.type === "QUALIFICATION_FAILED",
+  );
+  const qualificationFailed =
+    !qualification &&
+    latestQualificationActivity?.type === "QUALIFICATION_FAILED";
+
   return (
     <div>
       <PageHeader
@@ -188,9 +199,16 @@ export default async function LeadDetailPage({
               </div>
             ) : (
               <>
-                <p className="mt-4 text-sm text-slate-500">
-                  No AI qualification yet. The CRM remains fully usable — run
-                  qualification below when you are ready.
+                <p
+                  className={
+                    qualificationFailed
+                      ? "mt-4 text-sm text-amber-700"
+                      : "mt-4 text-sm text-slate-500"
+                  }
+                >
+                  {qualificationFailed
+                    ? "Automatic AI qualification failed — retry available."
+                    : "AI qualification pending. The CRM remains fully usable — run qualification below when you are ready."}
                 </p>
                 <RunQualificationButton leadId={lead.id} />
               </>

@@ -17,6 +17,9 @@ import { AiProviderError, type LeadQualificationProvider } from "./types";
  *   without leaking response internals
  * - the model's text is parsed as JSON and validated with the shared Zod
  *   schema; malformed output never reaches persistence (D-008)
+ * - HTTP 429 (rate limited) is retried at most once, and only when the
+ *   provider-supplied `Retry-After` is short. This is deliberately tiny so
+ *   a free quota is never burned and no retry loop can run away.
  */
 
 type OpenAiChatChoice = {
@@ -28,6 +31,35 @@ type OpenAiChatChoice = {
 type OpenAiChatResponse = {
   choices?: OpenAiChatChoice[];
 };
+
+const MAX_RATE_LIMIT_RETRIES = 1;
+const DEFAULT_RETRY_AFTER_MS = 1000;
+/** Never wait longer than this for a 429 retry; beyond it, fail fast. */
+const MAX_RETRY_AFTER_MS = 5000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Reads `Retry-After` (delta-seconds or HTTP-date). Returns `null` when the
+ * header is missing or unparseable so the caller can apply a small default.
+ */
+function parseRetryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+
+  const seconds = Number(header.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) {
+    return Math.max(0, date - Date.now());
+  }
+
+  return null;
+}
 
 export class OpenAiCompatibleProvider implements LeadQualificationProvider {
   constructor(
@@ -42,6 +74,50 @@ export class OpenAiCompatibleProvider implements LeadQualificationProvider {
   ) {}
 
   async qualify(input: QualificationInput): Promise<QualificationResult> {
+    let attempt = 0;
+
+    for (;;) {
+      const response = await this.request(input);
+
+      if (!response.ok) {
+        if (response.status === 429) {
+          const retryAfterMs =
+            parseRetryAfterMs(response.headers.get("retry-after")) ??
+            DEFAULT_RETRY_AFTER_MS;
+          const canRetry =
+            attempt < MAX_RATE_LIMIT_RETRIES &&
+            retryAfterMs <= MAX_RETRY_AFTER_MS;
+
+          if (canRetry) {
+            attempt += 1;
+            if (retryAfterMs > 0) {
+              await sleep(retryAfterMs);
+            }
+            continue;
+          }
+
+          // Retries exhausted or the requested wait is too long: fail fast
+          // and leave manual requalification available.
+          throw new AiProviderError(
+            "RATE_LIMITED",
+            "AI provider rate limited the request. Try again shortly.",
+          );
+        }
+
+        // Deliberately do not include the response body: it could contain
+        // provider-side details we do not want in logs or responses.
+        throw new AiProviderError(
+          "PROVIDER",
+          `AI provider request failed with status ${response.status}.`,
+        );
+      }
+
+      return this.parseResponse(response);
+    }
+  }
+
+  /** Single bounded HTTP attempt; timeout/network errors are normalized. */
+  private async request(input: QualificationInput): Promise<Response> {
     const { apiKey, baseUrl, model, timeoutMs } = this.options;
 
     if (!apiKey) {
@@ -54,9 +130,8 @@ export class OpenAiCompatibleProvider implements LeadQualificationProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-    let response: Response;
     try {
-      response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      return await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -75,30 +150,19 @@ export class OpenAiCompatibleProvider implements LeadQualificationProvider {
         signal: controller.signal,
       });
     } catch (error) {
-      clearTimeout(timeout);
       if (error instanceof Error && error.name === "AbortError") {
-        throw new AiProviderError(
-          "TIMEOUT",
-          "AI provider request timed out.",
-        );
+        throw new AiProviderError("TIMEOUT", "AI provider request timed out.");
       }
-      throw new AiProviderError(
-        "NETWORK",
-        "Could not reach the AI provider.",
-      );
+      throw new AiProviderError("NETWORK", "Could not reach the AI provider.");
+    } finally {
+      clearTimeout(timeout);
     }
+  }
 
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      // Deliberately do not include the response body: it could contain
-      // provider-side details we do not want in logs or responses.
-      throw new AiProviderError(
-        "PROVIDER",
-        `AI provider request failed with status ${response.status}.`,
-      );
-    }
-
+  /** Parses + Zod-validates a successful completion. */
+  private async parseResponse(
+    response: Response,
+  ): Promise<QualificationResult> {
     let payload: OpenAiChatResponse;
     try {
       payload = (await response.json()) as OpenAiChatResponse;

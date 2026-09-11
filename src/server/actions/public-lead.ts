@@ -1,11 +1,13 @@
 "use server";
 
+import { after } from "next/server";
 import { z } from "zod";
 
 import { publicLeadInputSchema } from "@/domain/lead";
 import { organizationSlugSchema } from "@/domain/organization";
 import { prisma } from "@/server/db/prisma";
 import { getOrganizationBySlug } from "@/server/db/organization";
+import { runAutomaticQualification } from "@/server/ai/qualify-lead";
 
 /**
  * Public lead capture (T031).
@@ -21,6 +23,12 @@ import { getOrganizationBySlug } from "@/server/db/organization";
  * - errors are generic; no stack traces or internals reach the client
  * - the endpoint is a single server action, so rate limiting/spam protection
  *   can wrap it later without changing callers
+ *
+ * After the lead and its LEAD_CREATED activity are persisted, AI
+ * qualification is scheduled with `after()` so it runs *after* the visitor's
+ * success response (T056). AI success, failure, timeout, or rate limiting can
+ * never fail or delay the submission, and the lead stays manually
+ * requalifiable from the dashboard.
  */
 
 export type PublicLeadState =
@@ -131,6 +139,16 @@ export async function submitPublicLead(
         message: `New public inquiry from ${parsed.data.name}`,
       },
     });
+
+    // Runs after the response is sent. Scheduling is best-effort and must
+    // never affect the visitor's already-successful submission.
+    try {
+      await after(async () => {
+        await runAutomaticQualification({ organizationId, leadId: lead.id });
+      });
+    } catch {
+      // Ignore: the inquiry is persisted and can be qualified manually.
+    }
 
     return { status: "success" };
   } catch {

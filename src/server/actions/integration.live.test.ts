@@ -8,6 +8,15 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
+// Public submissions schedule post-response AI qualification via after().
+// The vitest runtime has no request scope, so run the task inline and await
+// it — this keeps the automatic qualification deterministic for assertions.
+vi.mock("next/server", () => ({
+  after: async (task: () => void | Promise<void>) => {
+    await task();
+  },
+}));
+
 const testEmail = "tenant-isolation-test@example.com";
 const secondOrgSlug = "isolation-test-org";
 
@@ -132,6 +141,8 @@ afterAll(async () => {
           "public-flow-test@example.com",
           "esmael-flow-test@example.com",
           "override-attempt-test@example.com",
+          "auto-qualify-success@example.com",
+          "auto-qualify-failure@example.com",
         ],
       },
     },
@@ -342,6 +353,140 @@ describe("public lead routing (live database)", () => {
       where: { email: "public-flow-test@example.com" },
     });
     expect(after).toBe(before);
+  });
+});
+
+describe("automatic qualification on public submission (live database)", () => {
+  let successLeadId: string;
+
+  it("returns success and persists a qualification with a system (null) actor", async () => {
+    const { submitPublicLead } = await import(
+      "@/server/actions/public-lead"
+    );
+
+    const result = await submitPublicLead(
+      "demo-realty",
+      { status: "idle" },
+      publicLeadForm("auto-qualify-success@example.com"),
+    );
+    expect(result).toEqual({ status: "success" });
+
+    const lead = await prisma.lead.findFirst({
+      where: {
+        email: "auto-qualify-success@example.com",
+        organizationId,
+      },
+      select: { id: true },
+    });
+    expect(lead).not.toBeNull();
+    successLeadId = lead!.id;
+
+    const qualification = await prisma.leadQualification.findFirst({
+      where: { leadId: successLeadId, organizationId },
+    });
+    expect(qualification).not.toBeNull();
+    expect(qualification?.reviewState).toBe("GENERATED");
+
+    const generated = await prisma.activity.findFirst({
+      where: {
+        leadId: successLeadId,
+        organizationId,
+        type: "QUALIFICATION_GENERATED",
+      },
+      select: { actorUserId: true },
+    });
+    expect(generated).not.toBeNull();
+    // Automatic/system activity uses a null actor, not a user.
+    expect(generated?.actorUserId).toBeNull();
+  });
+
+  it("keeps the lead and returns success when automatic AI fails", async () => {
+    const { submitPublicLead } = await import(
+      "@/server/actions/public-lead"
+    );
+
+    const formData = publicLeadForm("auto-qualify-failure@example.com");
+    formData.set(
+      "message",
+      "Please trigger a failure MOCK_AI_FAILURE for this inquiry.",
+    );
+
+    const result = await submitPublicLead("demo-realty", { status: "idle" }, formData);
+    expect(result).toEqual({ status: "success" });
+
+    const lead = await prisma.lead.findFirst({
+      where: {
+        email: "auto-qualify-failure@example.com",
+        organizationId,
+      },
+      select: { id: true, status: true, message: true },
+    });
+    expect(lead).not.toBeNull();
+    // The lead is intact and unchanged by the failed qualification.
+    expect(lead?.status).toBe("NEW");
+    expect(lead?.message).toContain("MOCK_AI_FAILURE");
+
+    const created = await prisma.activity.findFirst({
+      where: { leadId: lead!.id, type: "LEAD_CREATED" },
+    });
+    expect(created).not.toBeNull();
+
+    const failed = await prisma.activity.findFirst({
+      where: {
+        leadId: lead!.id,
+        organizationId,
+        type: "QUALIFICATION_FAILED",
+      },
+      select: { actorUserId: true },
+    });
+    expect(failed).not.toBeNull();
+    expect(failed?.actorUserId).toBeNull();
+
+    const qualifications = await prisma.leadQualification.count({
+      where: { leadId: lead!.id },
+    });
+    expect(qualifications).toBe(0);
+  });
+
+  it("does not duplicate successful qualifications on repeated automatic runs", async () => {
+    expect(successLeadId).toBeTruthy();
+
+    const { runAutomaticQualification } = await import(
+      "@/server/ai/qualify-lead"
+    );
+
+    const outcome = await runAutomaticQualification({
+      organizationId,
+      leadId: successLeadId,
+    });
+    expect(outcome).toEqual({ status: "skipped" });
+
+    const count = await prisma.leadQualification.count({
+      where: { leadId: successLeadId, organizationId },
+    });
+    expect(count).toBe(1);
+  });
+
+  it("scopes qualification to the resolved organization (no cross-tenant run)", async () => {
+    expect(successLeadId).toBeTruthy();
+
+    const { qualifyLeadForOrganization } = await import(
+      "@/server/ai/qualify-lead"
+    );
+
+    // A demo-realty lead addressed with the second organization's id must
+    // behave exactly like a missing lead and write nothing.
+    const outcome = await qualifyLeadForOrganization({
+      organizationId: secondOrganizationId,
+      leadId: successLeadId,
+      actorUserId: null,
+    });
+    expect(outcome).toEqual({ status: "failed", message: "Lead not found." });
+
+    const crossTenant = await prisma.leadQualification.count({
+      where: { leadId: successLeadId, organizationId: secondOrganizationId },
+    });
+    expect(crossTenant).toBe(0);
   });
 });
 
@@ -750,10 +895,16 @@ describe("qualification workflow (live database, mock AI)", () => {
       };
     });
 
-    const { qualifyLead } = await import("@/server/ai/qualify-lead");
+    // Manual authenticated qualification goes through the action wrapper,
+    // which resolves the session + workspace and calls the trusted core.
+    const { runQualification } = await import(
+      "@/server/actions/qualification"
+    );
 
-    const outcome = await qualifyLead(leadId);
-    expect(outcome.status).toBe("succeeded");
+    const form = new FormData();
+    form.set("leadId", leadId);
+    const result = await runQualification({}, form);
+    expect(result.error).toBeUndefined();
 
     const qualification = await prisma.leadQualification.findFirst({
       where: { leadId, organizationId: secondOrganizationId },
@@ -801,9 +952,13 @@ describe("qualification workflow (live database, mock AI)", () => {
       data: { message: "Trigger failure MOCK_AI_FAILURE please" },
     });
 
-    const { qualifyLead } = await import("@/server/ai/qualify-lead");
-    const outcome = await qualifyLead(leadId);
-    expect(outcome.status).toBe("failed");
+    const { runQualification } = await import(
+      "@/server/actions/qualification"
+    );
+    const form = new FormData();
+    form.set("leadId", leadId);
+    const result = await runQualification({}, form);
+    expect(result.error).toBeDefined();
 
     const lead = await prisma.lead.findUnique({
       where: { id: leadId },

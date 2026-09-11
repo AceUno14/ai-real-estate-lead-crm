@@ -18,6 +18,7 @@ export type AiProviderErrorCode =
   | "CONFIG"
   | "NETWORK"
   | "TIMEOUT"
+  | "RATE_LIMITED"
   | "PROVIDER"
   | "MALFORMED";
 

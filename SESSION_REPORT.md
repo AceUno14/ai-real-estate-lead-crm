@@ -421,3 +421,164 @@ architecture ambiguity was encountered. Deployment was not run (as instructed).
 Run `npm run build` (already clean) and deploy. After deploying, submit one test
 inquiry at `/lead/esmael-realty` and one at `/lead/demo-realty` and confirm each
 lead appears in the matching workspace dashboard.
+
+---
+
+# FOLLOW-UP SESSION — AUTOMATIC AI QUALIFICATION AFTER PUBLIC LEAD CAPTURE
+
+Session date: 2026-09-12
+
+Primary coding AI: DeepSeek V4 Flash
+
+Runtime AI provider: `mock` locally; Groq via the openai-compatible provider in
+production (unchanged by this task).
+
+## OBJECTIVE
+
+Run AI qualification automatically when a public lead is created, without
+making the visitor wait and without letting AI failure (including HTTP 429)
+affect the submission. Preserve the manual "Run AI qualification" fallback.
+
+## NEW CHAIN (recorded as D-028)
+
+```
+workspace-specific public lead
+→ persistence (Lead + LEAD_CREATED activity)
+→ successful visitor response
+→ automatic AI qualification (post-response, actorUserId = null)
+→ LeadQualification + QUALIFICATION_GENERATED activity
+→ human review
+→ dashboard ranking
+```
+
+## ARCHITECTURE
+
+Qualification is now two layers:
+
+1. **Trusted core — `qualifyLeadForOrganization({ organizationId, leadId,
+   actorUserId })`** (`src/server/ai/qualify-lead.ts`). Session-free: it never
+   reads cookies or the session. `organizationId` is a trusted server-resolved
+   value and the lead is always loaded by `organizationId + leadId`.
+2. **Authenticated manual wrapper** (`src/server/actions/qualification.ts`).
+   `runQualification` resolves the session + active workspace and calls the core
+   with the signed-in user as `actorUserId`.
+
+Automatic entry point: `runAutomaticQualification({ organizationId, leadId })`
+— skips when a qualification already exists (idempotent) and calls the core
+with `actorUserId = null`.
+
+### Post-response scheduling
+
+The public submit action schedules qualification with `after()` from
+`next/server`, Next.js 16's supported post-response API. Verified present in the
+installed version (`node_modules/next/dist/server/after/after.d.ts`, exported
+from `next/server`). No external queue or paid background service was added.
+Scheduling is wrapped so a scheduling failure cannot fail the submission.
+
+Because `after()` requires a request scope, the vitest runtime mocks
+`next/server` so the task runs inline and awaited — keeping assertions
+deterministic without touching real infrastructure.
+
+## 429 HANDLING
+
+The OpenAI-compatible provider now:
+
+- treats HTTP 429 as retryable with **at most one** bounded retry
+- respects `Retry-After` (delta-seconds or HTTP-date)
+- fails fast when `Retry-After` exceeds 5 seconds or retries are exhausted
+- throws `AiProviderError` with code `RATE_LIMITED` (safe message, no internals)
+- still normalizes timeout / network / malformed / other-provider errors
+
+Existing (non-429) behavior is unchanged. Retries are deliberately minimal so a
+free quota is never burned.
+
+## FAILURE BEHAVIOR
+
+For 429, timeout, outage, malformed output, or any provider error:
+
+- the lead and its `LEAD_CREATED` activity are kept and unmodified
+- a `QUALIFICATION_FAILED` activity is recorded (best-effort, with
+  `actorUserId = null` for automatic runs)
+- the manual "Run AI qualification" button remains available
+- no provider internals or secrets reach the visitor
+
+## IDEMPOTENCY
+
+- automatic runs skip when a qualification already exists for the lead
+- a single submission cannot produce duplicate successful qualifications
+- intentional manual requalification is preserved (the manual wrapper does not
+  skip)
+
+## PRODUCTION UX
+
+The lead detail page adds a small label in the existing "no qualification yet"
+state: "AI qualification pending" normally, or "Automatic AI qualification
+failed — retry available". The manual button and the whole page remain usable.
+No schema or layout overhaul was needed.
+
+## TESTS
+
+New unit (`src/server/ai/providers/openai-compatible-provider.test.ts`, 5):
+
+- success response parses to a schema-valid result (one fetch)
+- 429 with a short `Retry-After` retries once, then succeeds (two fetches)
+- persistent 429 stops after the bounded retry (never unbounded)
+- a long `Retry-After` is not retried (one fetch)
+- non-429 provider errors are normalized without retrying
+
+New/updated live (`src/server/actions/integration.live.test.ts`):
+
+- submission succeeds and persists a `LeadQualification` +
+  `QUALIFICATION_GENERATED` activity with `actorUserId = null`
+- submission succeeds when automatic AI fails; the lead is unchanged; a
+  `QUALIFICATION_FAILED` activity is recorded; no qualification is persisted
+- repeated automatic runs skip and keep exactly one qualification
+- qualification is scoped to the resolved workspace; a cross-tenant run behaves
+  like a missing lead and writes nothing
+- manual authenticated qualification (via the action wrapper) still passes
+- existing human review edit/approve/reject coverage still passes
+- all workspace-specific public lead routing tests still pass
+
+## VERIFICATION
+
+```
+npm run typecheck   # clean
+npm run lint        # clean
+npm test            # 83 passed / 83 (10 files)
+npm run build       # clean; /lead and /lead/[organizationSlug] dynamic (ƒ)
+```
+
+## FILES CHANGED (THIS SESSION)
+
+| File | Change |
+| --- | --- |
+| `src/server/ai/qualify-lead.ts` | Session-free core + idempotent automatic runner |
+| `src/server/actions/qualification.ts` | Manual wrapper resolves session + calls core |
+| `src/server/actions/public-lead.ts` | Schedule automatic qualification via `after()` |
+| `src/server/ai/providers/openai-compatible-provider.ts` | Bounded 429 retry + `Retry-After` |
+| `src/server/ai/providers/types.ts` | Add `RATE_LIMITED` error code |
+| `src/server/ai/providers/openai-compatible-provider.test.ts` | New 429 unit tests |
+| `src/server/actions/integration.live.test.ts` | Automatic qualification coverage |
+| `src/app/(dashboard)/leads/[leadId]/page.tsx` | Pending / failed status label |
+| `DECISIONS.md` | Add D-028 |
+| `ARCHITECTURE.md` | Two-layer qualification + post-response flow |
+| `TASKS.md` | Add T056 + verified list |
+| `README.md` | Core workflow, AI qualification, status |
+| `SESSION_REPORT.md` | This section |
+
+## MIGRATION REQUIRED
+
+None. `Activity.actorUserId` is already nullable and `Activity.type` is a
+string, so the existing data model was sufficient.
+
+## BLOCKERS
+
+None. No destructive database operation, new credential, or architecture
+ambiguity was encountered. Deployment was not run (as instructed).
+
+## NEXT ACTION
+
+Deploy, then submit a test inquiry at `/lead/esmael-realty` and confirm the
+lead detail page shows an AI qualification without clicking the manual button.
+If Groq is rate limited, confirm the activity timeline records the failure and
+the manual "Run AI qualification" button still works.
