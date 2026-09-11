@@ -46,6 +46,19 @@ export const publicEnv: PublicEnv = publicEnvSchema.parse({
   NEXT_PUBLIC_APP_NAME: process.env.APP_NAME,
 });
 
+/**
+ * Default workspace slug used only by the legacy `/lead` route, which
+ * redirects to its workspace-specific URL `/lead/[organizationSlug]`.
+ *
+ * Read directly (with the same fallback as the schema) instead of through
+ * `getServerEnv()` so the redirect does not require DATABASE_URL/AUTH_SECRET
+ * to be present just to compute a URL.
+ */
+export function getDefaultPublicLeadOrgSlug(): string {
+  const value = process.env.PUBLIC_LEAD_ORG_SLUG?.trim();
+  return value && value.length > 0 ? value : "demo-realty";
+}
+
 let cachedServerEnv: ServerEnv | null = null;
 
 /**

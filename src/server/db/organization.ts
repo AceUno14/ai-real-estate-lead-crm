@@ -5,9 +5,9 @@ import { prisma } from "@/server/db/prisma";
 /**
  * Safe organization lookup helpers (T022).
  *
- * The slug resolution is used by the public lead capture flow: the slug
- * comes from server-side configuration, never from client-supplied
- * organization IDs.
+ * The slug resolution is used by the workspace-specific public lead flow
+ * (`/lead/[organizationSlug]`): the slug is a routing key resolved here to
+ * a trusted organization ID, never a client-supplied organization ID.
  */
 
 export async function getOrganizationBySlug(

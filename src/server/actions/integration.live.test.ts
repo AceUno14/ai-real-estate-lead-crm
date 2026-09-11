@@ -16,6 +16,8 @@ let organizationId: string;
 let leadId: string;
 let secondOrganizationId: string;
 let secondUserId: string;
+let esmaelOrganizationId: string;
+let createdEsmaelOrg = false;
 
 beforeAll(async () => {
   prisma = new PrismaClient({
@@ -77,6 +79,24 @@ beforeAll(async () => {
     select: { id: true },
   });
   leadId = foreignLead.id;
+
+  // Workspace-specific public lead routing needs a second, distinct workspace.
+  // `esmael-realty` may already exist in a real database, so only create it
+  // when missing and only delete it again when this test created it.
+  const esmael = await prisma.organization.findUnique({
+    where: { slug: "esmael-realty" },
+    select: { id: true },
+  });
+  if (esmael) {
+    esmaelOrganizationId = esmael.id;
+  } else {
+    const created = await prisma.organization.create({
+      data: { name: "Esmael Realty", slug: "esmael-realty" },
+      select: { id: true },
+    });
+    esmaelOrganizationId = created.id;
+    createdEsmaelOrg = true;
+  }
 });
 
 afterAll(async () => {
@@ -104,9 +124,17 @@ afterAll(async () => {
   });
   await prisma.user.deleteMany({ where: { id: secondUserId } });
 
-  // Remove leads created by the public-flow test (identified by marker email).
+  // Remove leads created by the public-flow tests (identified by marker email).
   const publicTestLeads = await prisma.lead.findMany({
-    where: { email: "public-flow-test@example.com" },
+    where: {
+      email: {
+        in: [
+          "public-flow-test@example.com",
+          "esmael-flow-test@example.com",
+          "override-attempt-test@example.com",
+        ],
+      },
+    },
     select: { id: true },
   });
   if (publicTestLeads.length > 0) {
@@ -118,28 +146,61 @@ afterAll(async () => {
     });
   }
 
+  // Remove the temporary Esmael Realty workspace only if we created it.
+  if (createdEsmaelOrg) {
+    await prisma.activity.deleteMany({
+      where: { organizationId: esmaelOrganizationId },
+    });
+    await prisma.leadQualification.deleteMany({
+      where: { organizationId: esmaelOrganizationId },
+    });
+    await prisma.followUpTask.deleteMany({
+      where: { organizationId: esmaelOrganizationId },
+    });
+    await prisma.leadNote.deleteMany({
+      where: { organizationId: esmaelOrganizationId },
+    });
+    await prisma.lead.deleteMany({
+      where: { organizationId: esmaelOrganizationId },
+    });
+    await prisma.membership.deleteMany({
+      where: { organizationId: esmaelOrganizationId },
+    });
+    await prisma.organization.deleteMany({
+      where: { id: esmaelOrganizationId },
+    });
+  }
+
   console.log(
     `cleanup ok (removed ${activities.count} activity rows from test org)`,
   );
   await prisma.$disconnect();
 });
 
-describe("public lead flow (live database)", () => {
-  it("creates a lead + activity in the configured organization", async () => {
+/** Minimal valid public submission with a marker email for cleanup. */
+function publicLeadForm(email: string): FormData {
+  const formData = new FormData();
+  formData.set("name", "Public Flow Test");
+  formData.set("email", email);
+  formData.set("inquiryType", "BUY");
+  formData.set("preferredLocation", "Test City");
+  formData.set("message", "Integration test inquiry from the public flow.");
+  formData.set("budgetMin", "250000");
+  formData.set("budgetMax", "400000");
+  return formData;
+}
+
+describe("public lead routing (live database)", () => {
+  it("resolves /lead/demo-realty and creates the lead under demo-realty", async () => {
     const { submitPublicLead } = await import(
       "@/server/actions/public-lead"
     );
 
-    const formData = new FormData();
-    formData.set("name", "Public Flow Test");
-    formData.set("email", "public-flow-test@example.com");
-    formData.set("inquiryType", "BUY");
-    formData.set("preferredLocation", "Test City");
-    formData.set("message", "Integration test inquiry from the public flow.");
-    formData.set("budgetMin", "250000");
-    formData.set("budgetMax", "400000");
-
-    const result = await submitPublicLead({ status: "idle" }, formData);
+    const result = await submitPublicLead(
+      "demo-realty",
+      { status: "idle" },
+      publicLeadForm("public-flow-test@example.com"),
+    );
     expect(result).toEqual({ status: "success" });
 
     const lead = await prisma.lead.findFirst({
@@ -153,9 +214,105 @@ describe("public lead flow (live database)", () => {
     expect(lead?.budgetMin).toBe(250000);
 
     const activity = await prisma.activity.findFirst({
-      where: { leadId: lead!.id, type: "LEAD_CREATED" },
+      where: {
+        leadId: lead!.id,
+        organizationId,
+        type: "LEAD_CREATED",
+      },
     });
     expect(activity).not.toBeNull();
+  });
+
+  it("resolves /lead/esmael-realty and creates the lead under Esmael Realty", async () => {
+    const { submitPublicLead } = await import(
+      "@/server/actions/public-lead"
+    );
+
+    const result = await submitPublicLead(
+      "esmael-realty",
+      { status: "idle" },
+      publicLeadForm("esmael-flow-test@example.com"),
+    );
+    expect(result).toEqual({ status: "success" });
+
+    const lead = await prisma.lead.findFirst({
+      where: {
+        email: "esmael-flow-test@example.com",
+        organizationId: esmaelOrganizationId,
+      },
+    });
+    expect(lead).not.toBeNull();
+    expect(lead?.status).toBe("NEW");
+
+    // The lead must land only in the workspace named by the route.
+    const inDemoRealty = await prisma.lead.findFirst({
+      where: {
+        email: "esmael-flow-test@example.com",
+        organizationId,
+      },
+    });
+    expect(inDemoRealty).toBeNull();
+  });
+
+  it("ignores a client-supplied organizationId", async () => {
+    const { submitPublicLead } = await import(
+      "@/server/actions/public-lead"
+    );
+
+    const formData = publicLeadForm("override-attempt-test@example.com");
+    // Attacker-supplied organization ID pointing at a different workspace.
+    formData.set("organizationId", esmaelOrganizationId);
+
+    const result = await submitPublicLead(
+      "demo-realty",
+      { status: "idle" },
+      formData,
+    );
+    expect(result).toEqual({ status: "success" });
+
+    const lead = await prisma.lead.findFirst({
+      where: { email: "override-attempt-test@example.com" },
+      select: { organizationId: true },
+    });
+    expect(lead?.organizationId).toBe(organizationId);
+    expect(lead?.organizationId).not.toBe(esmaelOrganizationId);
+
+    const inEsmael = await prisma.lead.count({
+      where: {
+        email: "override-attempt-test@example.com",
+        organizationId: esmaelOrganizationId,
+      },
+    });
+    expect(inEsmael).toBe(0);
+  });
+
+  it("does not create a lead for an unknown or malformed slug", async () => {
+    const { submitPublicLead } = await import(
+      "@/server/actions/public-lead"
+    );
+
+    const before = await prisma.lead.count({
+      where: { email: "esmael-flow-test@example.com" },
+    });
+
+    const unknown = await submitPublicLead(
+      "no-such-workspace-xyz",
+      { status: "idle" },
+      publicLeadForm("esmael-flow-test@example.com"),
+    );
+    expect(unknown.status).toBe("error");
+
+    const malformed = await submitPublicLead(
+      "not/a/slug",
+      { status: "idle" },
+      publicLeadForm("esmael-flow-test@example.com"),
+    );
+    expect(malformed.status).toBe("error");
+
+    const after = await prisma.lead.count({
+      where: { email: "esmael-flow-test@example.com" },
+    });
+    expect(after).toBe(before);
   });
 
   it("rejects invalid submissions without creating anything", async () => {
@@ -174,7 +331,11 @@ describe("public lead flow (live database)", () => {
     formData.set("preferredLocation", "Test City");
     formData.set("message", "should fail validation");
 
-    const result = await submitPublicLead({ status: "idle" }, formData);
+    const result = await submitPublicLead(
+      "demo-realty",
+      { status: "idle" },
+      formData,
+    );
     expect(result.status).toBe("error");
 
     const after = await prisma.lead.count({

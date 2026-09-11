@@ -12,9 +12,11 @@ const initialState: PublicLeadState = { status: "idle" };
 const inputClassName =
   "mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-900 focus:outline-none";
 
-export function LeadForm() {
+export function LeadForm({ organizationSlug }: { organizationSlug: string }) {
+  // The workspace slug is bound server-side, so the browser cannot swap in
+  // another organization when the form is submitted (D-027).
   const [state, formAction, pending] = useActionState(
-    submitPublicLead,
+    submitPublicLead.bind(null, organizationSlug),
     initialState,
   );
 

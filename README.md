@@ -95,6 +95,17 @@ Secondary:
 
 ### Public Lead Capture
 
+Public lead capture is workspace-specific: each organization has its own public
+form URL.
+
+```
+/lead/[organizationSlug]      e.g. /lead/demo-realty
+```
+
+The workspace is resolved from the slug entirely server-side, and unknown slugs
+return a 404. The legacy `/lead` route redirects to the configured default
+workspace (`PUBLIC_LEAD_ORG_SLUG`). See DECISIONS.md D-027.
+
 Collect:
 
 - name
@@ -228,6 +239,10 @@ Examples:
 Authorization is enforced server-side.
 
 The application must never trust a browser-provided organization ID by itself.
+
+Public lead capture is addressed by workspace slug, never by organization ID:
+the slug in `/lead/[organizationSlug]` is resolved to a trusted `organizationId`
+server-side, and any client-supplied `organizationId` is ignored.
 
 AI must never make authentication or authorization decisions.
 
@@ -388,7 +403,7 @@ Configurable provider
 
 ## CURRENT STATUS
 
-Implemented and verified through Phase 7 (dashboard insights): Next.js 16 + Prisma 7 foundation, credentials authentication, self-service workspace provisioning on sign-up, organization/tenant isolation, public lead capture, lead CRM (list/detail/status/notes/tasks), AI qualification with mock provider + human review, dashboard metrics and contact-first ranking, and a 64-test baseline.
+Implemented and verified through Phase 7 (dashboard insights): Next.js 16 + Prisma 7 foundation, credentials authentication, self-service workspace provisioning on sign-up, organization/tenant isolation, workspace-specific public lead capture (`/lead/[organizationSlug]`), lead CRM (list/detail/status/notes/tasks), AI qualification with mock provider + human review, dashboard metrics and contact-first ranking, and a 74-test baseline.
 
 The initial migration is applied and verified against the configured PostgreSQL/Neon database, and the seed has been run. Verification covers: migration state in sync, idempotent seed, authentication round trip, organization/tenant isolation and cross-tenant rejection, public lead persistence, lead list/detail rendering from persisted records, status/notes/follow-up-task/activity mutations, and mock AI qualification success, failure recovery, and human review.
 
@@ -408,7 +423,7 @@ npm run db:seed
 npm run dev
 ```
 
-The seed creates the fictional organization `demo-realty` and a demo owner (`owner@demo-realty.test`). The seed script prints the demo password on completion; all seeded people and inquiries are fictional. Sign in at `/sign-in`, or submit a public inquiry at `/lead`.
+The seed creates the fictional organization `demo-realty` and a demo owner (`owner@demo-realty.test`). The seed script prints the demo password on completion; all seeded people and inquiries are fictional. Sign in at `/sign-in`, or submit a public inquiry at `/lead/demo-realty` (the legacy `/lead` route redirects there).
 
 Accounts created at `/sign-up` automatically receive their own real-estate workspace with an OWNER membership, so a new user can reach the dashboard immediately without waiting for an invitation.
 

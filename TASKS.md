@@ -254,7 +254,7 @@ Requirements:
 
 Status: [x]
 
-Progress note: verified against Neon by the live integration test. submitPublicLead resolves the organization server-side from PUBLIC_LEAD_ORG_SLUG, validates with Zod, creates the Lead (status NEW) + a LEAD_CREATED Activity, and returns success; an invalid submission creates nothing. Browser never supplies an organization id.
+Progress note: verified against Neon by the live integration test. submitPublicLead resolves the organization server-side from the workspace slug in the route (D-027), validates with Zod, creates the Lead (status NEW) + a LEAD_CREATED Activity, and returns success; an invalid submission creates nothing. Browser never supplies an organization id.
 
 Scope:
 
@@ -270,6 +270,37 @@ Security:
 Do not trust organizationId supplied by the browser.
 
 Design the endpoint so rate limiting and spam protection can be added later.
+
+## T032 — Workspace-Specific Public Lead Routing
+
+Status: [x]
+
+Progress note: public lead capture is now workspace-specific (D-027). The form
+lives at `/lead/[organizationSlug]`; the page validates the slug, resolves the
+organization server-side with `getOrganizationBySlug`, and renders a 404 for
+unknown or malformed slugs (no submission path). The submit action now takes a
+server-bound `organizationSlug`, resolves the trusted `organizationId` itself,
+and ignores any `organizationId` in the payload. The legacy `/lead` route
+redirects to `/lead/<PUBLIC_LEAD_ORG_SLUG>`, which now only selects the default
+workspace for that redirect. Covered by live tests: `/lead/demo-realty` and
+`/lead/esmael-realty` each create leads under their own workspace, a
+client-supplied `organizationId` is ignored, and unknown/malformed slugs create
+nothing. Tenant isolation and public lead validation remain intact.
+
+Scope:
+
+- new `/lead/[organizationSlug]` route that resolves the organization server-side
+- slug validation schema (`src/domain/organization.ts`)
+- submit action resolves the slug to a trusted organizationId
+- never accept or trust a client-supplied organizationId
+- legacy `/lead` redirect to the configured default workspace
+- tests proving routing, isolation, and validation
+- documentation updates
+
+Security:
+
+- unknown slug → not-found, no lead created
+- organizationId is always resolved server-side
 
 # PHASE 5 — CRM DASHBOARD
 
@@ -740,5 +771,18 @@ Verified this session:
 - status/notes/follow-up-task/activity mutations
 - mock AI qualification success + failure recovery + human review
 - self-service sign-up workspace provisioning + dashboard access (D-026)
+
+Verified this session (T032 — workspace-specific public lead routing):
+
+- `/lead/[organizationSlug]` resolves the slug server-side to one workspace
+- `/lead/demo-realty` and `/lead/esmael-realty` each create leads under their
+  own workspace
+- a browser-supplied `organizationId` is ignored
+- unknown/malformed slugs create nothing (404 / error, no writes)
+- legacy `/lead` redirects to the configured default workspace
+
+Note: the application is deployed to Vercel with a Neon production database and
+Groq as the runtime AI provider. That state is user-reported; T080–T082 remain
+unchecked in this file until a production smoke test is run and recorded.
 
 The coding AI should continue with the first incomplete task that does not require user input.

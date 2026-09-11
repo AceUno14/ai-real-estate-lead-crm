@@ -3,7 +3,7 @@
 import { z } from "zod";
 
 import { publicLeadInputSchema } from "@/domain/lead";
-import { getServerEnv } from "@/lib/env";
+import { organizationSlugSchema } from "@/domain/organization";
 import { prisma } from "@/server/db/prisma";
 import { getOrganizationBySlug } from "@/server/db/organization";
 
@@ -11,9 +11,13 @@ import { getOrganizationBySlug } from "@/server/db/organization";
  * Public lead capture (T031).
  *
  * Security model:
- * - the target organization is resolved server-side from PUBLIC_LEAD_ORG_SLUG
- *   — the browser never sends an organization ID (D-005)
+ * - routing is workspace-specific: the slug comes from `/lead/[organizationSlug]`
+ *   and is bound to this action server-side when the page renders
+ * - the slug is only a selection key; the trusted organizationId is resolved
+ *   server-side from it. The browser never sends an organization ID and any
+ *   `organizationId` field in the payload is ignored (D-005 / D-027)
  * - input is validated with the shared Zod schema before persistence
+ * - an unknown/invalid slug is rejected without creating anything
  * - errors are generic; no stack traces or internals reach the client
  * - the endpoint is a single server action, so rate limiting/spam protection
  *   can wrap it later without changing callers
@@ -23,6 +27,10 @@ export type PublicLeadState =
   | { status: "idle" }
   | { status: "success" }
   | { status: "error"; message: string };
+
+/** Generic, non-revealing failure used for config/database/slug problems. */
+const GENERIC_ERROR =
+  "We could not process your inquiry right now. Please try again later.";
 
 /** Numeric form fields arrive as strings; empty string means "not provided". */
 const numberFromForm = z.preprocess((value) => {
@@ -43,9 +51,17 @@ function optionalString(value: FormDataEntryValue | null): string | undefined {
 }
 
 export async function submitPublicLead(
+  organizationSlug: string,
   _prevState: PublicLeadState,
   formData: FormData,
 ): Promise<PublicLeadState> {
+  // The slug is bound server-side by the workspace page. Only its shape is
+  // validated here; existence is checked with a server-side lookup below.
+  const parsedSlug = organizationSlugSchema.safeParse(organizationSlug);
+  if (!parsedSlug.success) {
+    return { status: "error", message: GENERIC_ERROR };
+  }
+
   const parsed = publicLeadFormSchema.safeParse({
     name: optionalString(formData.get("name")),
     email: optionalString(formData.get("email")),
@@ -59,6 +75,7 @@ export async function submitPublicLead(
     financingStatus: optionalString(formData.get("financingStatus")),
     message: optionalString(formData.get("message")),
     source: optionalString(formData.get("source")),
+    // NOTE: any client-supplied `organizationId` is deliberately never read.
   });
 
   if (!parsed.success) {
@@ -71,27 +88,18 @@ export async function submitPublicLead(
     };
   }
 
-  const env = getServerEnv();
-
   let organizationId: string;
   try {
-    const organization = await getOrganizationBySlug(env.PUBLIC_LEAD_ORG_SLUG);
+    const organization = await getOrganizationBySlug(parsedSlug.data);
     if (!organization) {
-      // Server-side configuration problem — never expose details.
-      return {
-        status: "error",
-        message:
-          "We could not process your inquiry right now. Please try again later.",
-      };
+      // Unknown workspace: never reveal whether the slug exists.
+      return { status: "error", message: GENERIC_ERROR };
     }
+    // Trusted, server-resolved organization ID.
     organizationId = organization.id;
   } catch {
     // Database or configuration unavailable — degrade gracefully.
-    return {
-      status: "error",
-      message:
-        "We could not process your inquiry right now. Please try again later.",
-    };
+    return { status: "error", message: GENERIC_ERROR };
   }
 
   try {
@@ -126,10 +134,6 @@ export async function submitPublicLead(
 
     return { status: "success" };
   } catch {
-    return {
-      status: "error",
-      message:
-        "We could not process your inquiry right now. Please try again later.",
-    };
+    return { status: "error", message: GENERIC_ERROR };
   }
 }

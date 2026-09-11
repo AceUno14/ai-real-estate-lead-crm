@@ -208,11 +208,21 @@ Keep the architectural responsibilities separated even if paths change.
 
 ## PUBLIC LEAD CAPTURE FLOW
 
-Visitor
-→ Public lead form
-→ Server receives request
-→ Validate with Zod
-→ Safely resolve target organization
+Public lead capture is **workspace-specific** (D-027). Each organization has
+its own public form URL:
+
+/lead/[organizationSlug]
+
+GET /lead/[organizationSlug]
+→ server validates the slug shape
+→ server resolves the slug to an Organization
+→ unknown/invalid slug → 404 (no form, no submission path)
+→ render the public lead form with the workspace slug bound server-side
+
+POST (server action)
+→ Server receives request with the server-bound slug
+→ Validate form input with Zod
+→ Resolve the slug to a trusted organizationId server-side
 → Create Lead
 → Create Activity record
 → Trigger AI qualification
@@ -220,7 +230,16 @@ Visitor
 
 The browser must not be trusted to choose arbitrary organization IDs.
 
-For the demo, a safe organization slug can be resolved server-side.
+The route may carry an `organizationSlug`, but the `organizationId` is always
+resolved server-side from that slug. Any `organizationId` supplied by the
+browser is ignored.
+
+Legacy `/lead`
+→ redirects to `/lead/<PUBLIC_LEAD_ORG_SLUG>` (default workspace)
+
+`PUBLIC_LEAD_ORG_SLUG` now only selects the default workspace for the legacy
+redirect; it is never used to route a submission whose URL already names a
+workspace.
 
 ## AUTHENTICATED DASHBOARD FLOW
 

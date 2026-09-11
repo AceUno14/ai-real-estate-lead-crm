@@ -514,3 +514,57 @@ Not chosen:
 
 - invite-only onboarding for the public sign-up route
 - client-supplied organization names or slugs
+
+## D-027 — Workspace-Specific Public Lead URLs
+
+Status: Accepted
+
+Decision:
+
+Public lead capture is workspace-specific. Every organization has its own
+public form URL:
+
+```
+/lead/[organizationSlug]
+```
+
+Flow:
+
+```
+GET /lead/[organizationSlug]
+→ server validates the slug shape
+→ server resolves the slug to an Organization
+→ unknown/invalid slug returns 404
+→ render the public form with the slug bound server-side
+→ submission is resolved to a trusted organizationId server-side
+→ create Lead
+→ create LEAD_CREATED Activity
+```
+
+Rules:
+
+- the route may carry an `organizationSlug`, but the `organizationId` is
+  always resolved server-side; a `organizationId` supplied by the browser is
+  ignored
+- the slug is bound to the submit action server-side, so the client cannot
+  swap in another workspace at submit time
+- unknown or malformed slugs return not-found and create nothing
+- tenant isolation and existing public lead validation are unchanged
+- the legacy `/lead` route redirects to `/lead/<PUBLIC_LEAD_ORG_SLUG>`
+
+`PUBLIC_LEAD_ORG_SLUG` is retained and now only selects the default workspace
+used by the legacy `/lead` redirect. It is never used to route a submission
+whose URL already names a workspace.
+
+Reason:
+
+The previous design used a single global `PUBLIC_LEAD_ORG_SLUG`, so every
+submission went to one configured organization. This caused leads to be routed
+to the wrong workspace (for example `demo-realty` instead of `esmael-realty`).
+Workspace-specific URLs let several organizations each publish a public form
+while keeping server-side tenant resolution and isolation intact.
+
+Not chosen:
+
+- accepting an organization ID from the browser
+- a single global organization variable for all public submissions

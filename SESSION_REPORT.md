@@ -299,3 +299,125 @@ explicitly not started.
 ## NEXT ACTION AFTER FOLLOW-UP SESSION
 
 Provide Vercel + production Neon access to continue T080 → T082, then finish T091.
+
+---
+
+# FOLLOW-UP SESSION — WORKSPACE-SPECIFIC PUBLIC LEAD ROUTING
+
+Session date: 2026-09-12
+
+Primary coding AI: DeepSeek V4 Flash
+
+Runtime AI provider: `mock` (local); production runs Groq via the
+openai-compatible provider (unchanged by this task).
+
+## OBJECTIVE
+
+Public lead routing previously used one global environment variable
+(`PUBLIC_LEAD_ORG_SLUG`), so every `/lead` submission went to a single
+configured organization. This caused leads to be routed to the wrong
+workspace. Make public lead capture workspace-specific while keeping tenant
+isolation, Zod validation, and the existing production flow intact.
+
+## DESIGN (recorded as D-027)
+
+```
+GET /lead/[organizationSlug]
+→ validate the slug shape server-side
+→ resolve it to an Organization
+→ unknown/invalid slug → 404 (no form, no submission path)
+→ render the public form with the slug bound to the submit action server-side
+
+POST (server action)
+→ bound slug is the only workspace selector
+→ validate form input with Zod
+→ resolve the slug to a trusted organizationId server-side
+→ create Lead + LEAD_CREATED Activity
+```
+
+- The browser never sends or influences an `organizationId`; any such field is
+  ignored.
+- The slug is bound server-side with `submitPublicLead.bind(null, slug)`, so it
+  cannot be swapped in the client at submit time.
+- The legacy `/lead` route redirects to `/lead/<PUBLIC_LEAD_ORG_SLUG>`.
+  `PUBLIC_LEAD_ORG_SLUG` is retained and now only selects the default workspace
+  for that redirect — it no longer routes submissions that name a workspace.
+
+## IMPLEMENTATION
+
+| File | Change |
+| --- | --- |
+| `src/app/(marketing)/lead/[organizationSlug]/page.tsx` | New workspace-specific form route; validates + resolves the slug, 404 for unknown slugs |
+| `src/app/(marketing)/lead/page.tsx` | Legacy `/lead` now redirects to the default workspace URL |
+| `src/app/(marketing)/lead/lead-form.tsx` | Accepts `organizationSlug`; binds it to the server action |
+| `src/server/actions/public-lead.ts` | Signature takes the server-bound slug; resolves trusted `organizationId`; ignores client `organizationId`; generic errors |
+| `src/domain/organization.ts` | New `organizationSlugSchema` |
+| `src/lib/env.ts` | `getDefaultPublicLeadOrgSlug()` for the legacy redirect (no full env required) |
+| `src/server/db/organization.ts` | Updated slug-resolution doc comment |
+
+## TESTS
+
+Unit (`src/domain/organization.test.ts`, 7 tests): slug accepts real/seeded
+slugs, single tokens, normalizes case/whitespace; rejects empty, path
+traversal/separators, stray hyphens, and over-length values.
+
+Live database (`src/server/actions/integration.live.test.ts`, public lead
+routing describe rewritten to 5 tests):
+
+1. `/lead/demo-realty` creates the lead (and `LEAD_CREATED` activity) under
+   demo-realty.
+2. `/lead/esmael-realty` creates the lead under Esmael Realty and not under
+   demo-realty.
+3. a client-supplied `organizationId` is ignored (lead lands in the slug's
+   workspace, nothing is written to the other workspace).
+4. an unknown slug and a malformed slug both fail and create nothing.
+5. invalid form input creates nothing (existing validation coverage retained).
+
+Existing tenant-isolation, follow-up task, human review, and qualification
+coverage is unchanged and still passes.
+
+The temporary `esmael-realty` workspace is only created when missing and is
+deleted afterwards only when this test created it, so an existing production
+workspace is never touched.
+
+## VERIFICATION
+
+```
+npm run typecheck   # clean
+npm run lint        # clean
+npm test            # 74 passed / 74 (9 files)
+npm run build       # clean; /lead and /lead/[organizationSlug] are dynamic (ƒ)
+```
+
+No database migration and no environment change are required.
+
+## FILES CHANGED (THIS SESSION)
+
+| File | Change |
+| --- | --- |
+| `src/app/(marketing)/lead/[organizationSlug]/page.tsx` | New workspace-specific public form route |
+| `src/app/(marketing)/lead/page.tsx` | Redirect to the default workspace URL |
+| `src/app/(marketing)/lead/lead-form.tsx` | Bind the workspace slug to the submit action |
+| `src/server/actions/public-lead.ts` | Server-resolved slug → trusted organizationId |
+| `src/domain/organization.ts` | New slug schema |
+| `src/domain/organization.test.ts` | New unit tests |
+| `src/lib/env.ts` | Default-slug helper for the legacy redirect |
+| `src/server/db/organization.ts` | Doc comment |
+| `src/server/actions/integration.live.test.ts` | Workspace-routing + security coverage |
+| `.env.example` | Clarify `PUBLIC_LEAD_ORG_SLUG` is redirect-only now |
+| `ARCHITECTURE.md` | Workspace-specific public lead flow |
+| `DECISIONS.md` | Add D-027 |
+| `TASKS.md` | Add T032, update T031 note and verified list |
+| `README.md` | Public lead capture + status + local run note |
+| `SESSION_REPORT.md` | This section |
+
+## BLOCKERS
+
+None. No destructive database operation, no new credential, and no
+architecture ambiguity was encountered. Deployment was not run (as instructed).
+
+## NEXT ACTION
+
+Run `npm run build` (already clean) and deploy. After deploying, submit one test
+inquiry at `/lead/esmael-realty` and one at `/lead/demo-realty` and confirm each
+lead appears in the matching workspace dashboard.
