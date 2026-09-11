@@ -833,3 +833,171 @@ None. Deployment was not run (as instructed).
 
 Deploy and re-run the production smoke test for a HIGH/URGENT inquiry; confirm
 exactly one automatic follow-up task appears. No further action on this item.
+
+---
+
+# FOLLOW-UP SESSION — HOT-LEAD EMAIL NOTIFICATION (RESEND)
+
+Session date: 2026-09-12
+
+Primary coding AI: DeepSeek V4 Flash
+
+Runtime AI provider: `mock` locally; Groq (`openai/gpt-oss-20b`) via the
+openai-compatible provider in production (unchanged by this task).
+
+## OBJECTIVE
+
+Email the responsible CRM user when a newly qualified lead is HIGH or URGENT,
+without adding SMS, a paid queue, or a global recipient variable.
+
+## NEW CHAIN (recorded as D-030)
+
+```
+workspace-specific public lead
+→ persistence
+→ automatic AI qualification
+→ HIGH / URGENT lead
+→ automatic follow-up task
+→ agent email notification (Resend)
+→ human action
+→ dashboard / task workflow
+```
+
+## RECIPIENT RULE (SERVER-SIDE ONLY)
+
+1. if `lead.assignedToUserId` is set **and** that user is a member of the lead's
+   organization → notify that user only
+2. otherwise → notify the organization's OWNER member(s)
+
+A stale/cross-tenant assignment falls through to the OWNER rule rather than
+emailing a user outside the workspace. Recipients are never read from an env
+variable, the public form, or the request.
+
+## EMAIL PROVIDER
+
+- Resend via its HTTP API using `fetch` — no SDK dependency was added
+- `src/server/services/resend-email.ts` is the transport: 15s timeout,
+  normalized failure codes, and one bounded retry for transient 5xx/network
+  failures (no retry for 4xx or 429)
+- `RESEND_API_KEY` (secret) and `RESEND_FROM_EMAIL` (sender) are optional; when
+  unset, `sendEmailViaResend` returns `NOT_CONFIGURED` and nothing is sent
+- the API key is never logged, returned, or included in emails/errors
+- emails include a simple professional HTML body plus a plain-text fallback;
+  every dynamic lead value is HTML-escaped, and the body links to the lead
+  detail page using `NEXT_PUBLIC_APP_URL`
+
+## PLACEMENT / ORDER
+
+The notification runs in the trusted qualification core, after the qualification
+row and its `QUALIFICATION_GENERATED` activity and after the automatic follow-up
+task attempt:
+
+```
+qualification persisted → qualification activity
+→ follow-up task attempt → hot-lead notification attempt
+```
+
+Each automation is independently wrapped in its own `try/catch`.
+
+## IDEMPOTENCY
+
+- `HOT_LEAD_NOTIFICATION_SENT` is the Activity-ledger marker, with metadata
+  `{ qualificationId, priority, recipientCount, provider: "resend" }`
+- before sending, the service checks whether a successful notification already
+  exists for that qualification
+- the transport also sends a stable `Idempotency-Key` of
+  `hot-lead-notification-<qualificationId>` as an external backstop, but the
+  database check remains authoritative
+
+## FAILURE BEHAVIOR
+
+For 4xx, 5xx, timeout, or network errors:
+
+- the lead, qualification, automatic follow-up task, and visitor submission are
+  untouched
+- a safe `HOT_LEAD_NOTIFICATION_FAILED` activity is recorded (no provider
+  response bodies, no credentials)
+- qualification is never turned into a failure
+- at most one small retry for transient 5xx/network; auth/config/429 are not
+  retried
+
+When Resend is simply not configured, the service skips silently (no failure
+activity), so a deployment can opt out of email without noise.
+
+## TESTS
+
+New unit (`src/server/services/resend-email.test.ts`, 7): not configured → no
+request; posts with `Authorization` + stable `Idempotency-Key` and correct body;
+401 not retried; 429 not retried; transient 5xx retried once then succeeds;
+persistent 5xx bounded to two attempts; network error bounded and normalized.
+
+New unit (`src/server/services/hot-lead-notification.test.ts`, 4): HIGH/URGENT
+subjects; body includes all required fields and the lead link; HTML escaping of
+untrusted lead text; missing optional fields tolerated.
+
+New live (`src/server/actions/integration.live.test.ts`, 9): assigned user
+notified; assigned-but-not-in-org falls back to OWNER; OWNER fallback with no
+assignment; other organizations never resolved; URGENT sends one notification
+with a stable idempotency key and a `HOT_LEAD_NOTIFICATION_SENT` activity with
+the expected metadata; HIGH sends one to the assigned user; MEDIUM/LOW send
+none; duplicate execution sends nothing extra; a delivery failure preserves the
+qualification and follow-up task, records a safe failure activity, and sends no
+success activity.
+
+The live suite mocks the Resend transport entirely, so no test touches the
+network. Existing automatic-task, manual-task, automatic-qualification, human
+review, and public lead routing tests still pass.
+
+## VERIFICATION
+
+```
+npm run typecheck   # clean
+npm run lint        # clean
+npm test            # 116 passed / 116 (13 files)
+npm run build       # clean
+```
+
+## FILES CHANGED (THIS SESSION)
+
+| File | Change |
+| --- | --- |
+| `src/server/services/resend-email.ts` | New Resend HTTP transport |
+| `src/server/services/hot-lead-notification.ts` | New recipient rule, email builder, idempotent sender |
+| `src/server/services/resend-email.test.ts` | New transport unit tests |
+| `src/server/services/hot-lead-notification.test.ts` | New email-builder unit tests |
+| `src/server/ai/qualify-lead.ts` | Send notification after the follow-up task |
+| `src/lib/env.ts` | `getResendConfig()` helper |
+| `.env.example` | `RESEND_API_KEY` / `RESEND_FROM_EMAIL` placeholders |
+| `src/server/actions/integration.live.test.ts` | Recipient + notification live coverage |
+| `DECISIONS.md` | Add D-030 |
+| `ARCHITECTURE.md` | Notification section, core flow, activity examples |
+| `TASKS.md` | Add T058 + verified list |
+| `README.md` | Core workflow, notifications, status, local run |
+| `SESSION_REPORT.md` | This section |
+
+## MIGRATION REQUIRED
+
+None. Reuses `User.email`, `Membership`, `Lead.assignedToUserId`,
+`Activity.type`, and `Activity.metadata`.
+
+## ENV CHANGES
+
+New optional variables (documented in `.env.example`):
+
+- `RESEND_API_KEY` — secret
+- `RESEND_FROM_EMAIL` — sender, e.g. `AI Real Estate Lead CRM <alerts@yourdomain.com>`
+
+Both must be set in the Vercel project for production email. When unset, the app
+still works and sends nothing.
+
+## BLOCKERS
+
+None. No destructive database operation, migration, or new architecture
+ambiguity was encountered. Deployment was not run (as instructed).
+
+## NEXT ACTION
+
+Set `RESEND_API_KEY` and `RESEND_FROM_EMAIL` in the Vercel project (and verify
+the sending domain in Resend), deploy, then submit a HIGH/URGENT inquiry at
+`/lead/esmael-realty` and confirm exactly one alert email arrives and a
+`HOT_LEAD_NOTIFICATION_SENT` activity appears on the lead.

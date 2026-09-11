@@ -42,6 +42,37 @@ vi.mock("@/server/services/auto-follow-up-task", async (importOriginal) => {
   };
 });
 
+// Replace the Resend transport so the live suite never touches the network.
+// It captures calls and can simulate a provider failure.
+const { emailControl } = vi.hoisted(() => ({
+  emailControl: {
+    shouldFail: false,
+    calls: [] as Array<{
+      to: string[];
+      subject: string;
+      idempotencyKey: string;
+    }>,
+  },
+}));
+
+vi.mock("@/server/services/resend-email", () => ({
+  sendEmailViaResend: async (input: {
+    to: string[];
+    subject: string;
+    idempotencyKey: string;
+  }) => {
+    emailControl.calls.push({
+      to: input.to,
+      subject: input.subject,
+      idempotencyKey: input.idempotencyKey,
+    });
+    if (emailControl.shouldFail) {
+      return { ok: false, code: "PROVIDER_ERROR", retryable: false };
+    }
+    return { ok: true, messageId: `test-message-${emailControl.calls.length}` };
+  },
+}));
+
 const testEmail = "tenant-isolation-test@example.com";
 const secondOrgSlug = "isolation-test-org";
 
@@ -761,6 +792,361 @@ describe("automatic follow-up tasks (live database)", () => {
       expect(await prisma.followUpTask.count({ where: { leadId } })).toBe(0);
     } finally {
       autoTaskControl.shouldFail = false;
+    }
+  });
+});
+
+describe("hot lead email notifications (live database)", () => {
+  const ownerEmail = "hot-lead-owner@example.com";
+  const memberEmail = "hot-lead-member@example.com";
+  const foreignEmail = "hot-lead-foreign@example.com";
+
+  let ownerUserId: string;
+  let memberUserId: string;
+  let foreignUserId: string;
+
+  beforeAll(async () => {
+    async function makeUser(email: string, name: string) {
+      const user = await prisma.user.upsert({
+        where: { email },
+        update: {},
+        create: { name, email, passwordHash: "test-hash-not-a-real-password" },
+      });
+      return user.id;
+    }
+
+    ownerUserId = await makeUser(ownerEmail, "Hot Lead Owner");
+    memberUserId = await makeUser(memberEmail, "Hot Lead Member");
+    foreignUserId = await makeUser(foreignEmail, "Hot Lead Foreign");
+
+    await prisma.membership.upsert({
+      where: {
+        userId_organizationId: {
+          userId: ownerUserId,
+          organizationId: secondOrganizationId,
+        },
+      },
+      update: { role: "OWNER" },
+      create: {
+        userId: ownerUserId,
+        organizationId: secondOrganizationId,
+        role: "OWNER",
+      },
+    });
+
+    await prisma.membership.upsert({
+      where: {
+        userId_organizationId: {
+          userId: memberUserId,
+          organizationId: secondOrganizationId,
+        },
+      },
+      update: { role: "MEMBER" },
+      create: {
+        userId: memberUserId,
+        organizationId: secondOrganizationId,
+        role: "MEMBER",
+      },
+    });
+
+    // Member of a *different* organization: must never receive an alert.
+    await prisma.membership.upsert({
+      where: {
+        userId_organizationId: { userId: foreignUserId, organizationId },
+      },
+      update: { role: "MEMBER" },
+      create: {
+        userId: foreignUserId,
+        organizationId,
+        role: "MEMBER",
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await prisma.membership.deleteMany({
+      where: { userId: { in: [ownerUserId, memberUserId, foreignUserId] } },
+    });
+    await prisma.user.deleteMany({
+      where: { id: { in: [ownerUserId, memberUserId, foreignUserId] } },
+    });
+  });
+
+  async function createLead(overrides: {
+    name: string;
+    timeline?: string | null;
+    financingStatus?: string | null;
+    budgetMin?: number | null;
+    budgetMax?: number | null;
+    assignedToUserId?: string | null;
+  }): Promise<string> {
+    const lead = await prisma.lead.create({
+      data: {
+        organizationId: secondOrganizationId,
+        name: overrides.name,
+        email: `${overrides.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}@hot-lead.test`,
+        inquiryType: "BUY",
+        preferredLocation: "Hot Lead City",
+        message: "Hot-lead notification test lead.",
+        timeline: overrides.timeline ?? null,
+        financingStatus: overrides.financingStatus ?? null,
+        budgetMin: overrides.budgetMin ?? null,
+        budgetMax: overrides.budgetMax ?? null,
+        assignedToUserId: overrides.assignedToUserId ?? null,
+        status: "NEW",
+      },
+      select: { id: true },
+    });
+    return lead.id;
+  }
+
+  async function qualify(leadId: string) {
+    const { qualifyLeadForOrganization } = await import(
+      "@/server/ai/qualify-lead"
+    );
+    return qualifyLeadForOrganization({
+      organizationId: secondOrganizationId,
+      leadId,
+      actorUserId: null,
+    });
+  }
+
+  function metadataOf(value: unknown): Record<string, unknown> {
+    return (
+      typeof value === "object" && value !== null ? value : {}
+    ) as Record<string, unknown>;
+  }
+
+  describe("recipient resolution", () => {
+    it("prefers an assigned user who belongs to the organization", async () => {
+      const { resolveHotLeadRecipients } = await import(
+        "@/server/services/hot-lead-notification"
+      );
+      const recipients = await resolveHotLeadRecipients({
+        organizationId: secondOrganizationId,
+        assignedToUserId: memberUserId,
+      });
+      expect(recipients).toEqual([memberEmail]);
+    });
+
+    it("falls back to OWNER members when the assigned user is not in the organization", async () => {
+      const { resolveHotLeadRecipients } = await import(
+        "@/server/services/hot-lead-notification"
+      );
+      const recipients = await resolveHotLeadRecipients({
+        organizationId: secondOrganizationId,
+        assignedToUserId: foreignUserId,
+      });
+      expect(recipients).toContain(ownerEmail);
+      expect(recipients).toContain(testEmail); // existing OWNER of the test org
+      expect(recipients).not.toContain(foreignEmail);
+      expect(recipients).not.toContain(memberEmail);
+    });
+
+    it("notifies OWNER members when there is no assignment", async () => {
+      const { resolveHotLeadRecipients } = await import(
+        "@/server/services/hot-lead-notification"
+      );
+      const recipients = await resolveHotLeadRecipients({
+        organizationId: secondOrganizationId,
+        assignedToUserId: null,
+      });
+      expect(recipients).toContain(ownerEmail);
+      expect(recipients).toContain(testEmail);
+      expect(recipients).not.toContain(foreignEmail);
+    });
+
+    it("never resolves a member of another organization", async () => {
+      const { resolveHotLeadRecipients } = await import(
+        "@/server/services/hot-lead-notification"
+      );
+      const recipients = await resolveHotLeadRecipients({
+        organizationId,
+        assignedToUserId: null,
+      });
+      expect(recipients).not.toContain(ownerEmail);
+      expect(recipients).not.toContain(memberEmail);
+      expect(recipients).not.toContain(foreignEmail);
+    });
+  });
+
+  it("sends one notification for an URGENT qualification", async () => {
+    const leadId = await createLead({
+      name: "Urgent Email Lead",
+      timeline: "ASAP",
+      financingStatus: "CASH",
+      budgetMin: 600_000,
+      budgetMax: 900_000,
+    });
+    emailControl.calls.length = 0;
+
+    expect((await qualify(leadId)).status).toBe("succeeded");
+
+    const qualification = await prisma.leadQualification.findFirst({
+      where: { leadId, organizationId: secondOrganizationId },
+      select: { id: true, priority: true, score: true },
+    });
+    expect(qualification?.priority).toBe("URGENT");
+
+    expect(emailControl.calls).toHaveLength(1);
+    const sent = emailControl.calls[0];
+    expect(sent.subject).toContain("URGENT lead:");
+    expect(sent.subject).toContain(`score ${qualification!.score}`);
+    expect(sent.to).toContain(testEmail);
+    expect(sent.idempotencyKey).toBe(
+      `hot-lead-notification-${qualification!.id}`,
+    );
+
+    const activity = await prisma.activity.findFirst({
+      where: {
+        leadId,
+        organizationId: secondOrganizationId,
+        type: "HOT_LEAD_NOTIFICATION_SENT",
+      },
+      select: { actorUserId: true, metadata: true },
+    });
+    expect(activity).not.toBeNull();
+    expect(activity?.actorUserId).toBeNull();
+    const metadata = metadataOf(activity?.metadata);
+    expect(metadata.qualificationId).toBe(qualification!.id);
+    expect(metadata.priority).toBe("URGENT");
+    expect(metadata.provider).toBe("resend");
+    expect(metadata.recipientCount).toBeGreaterThan(0);
+  });
+
+  it("sends one notification for a HIGH qualification to the assigned user", async () => {
+    const leadId = await createLead({
+      name: "High Email Lead",
+      timeline: "ONE_TO_THREE_MONTHS",
+      financingStatus: "CASH",
+      assignedToUserId: memberUserId,
+    });
+    emailControl.calls.length = 0;
+
+    expect((await qualify(leadId)).status).toBe("succeeded");
+
+    const qualification = await prisma.leadQualification.findFirst({
+      where: { leadId, organizationId: secondOrganizationId },
+      select: { id: true, priority: true },
+    });
+    expect(qualification?.priority).toBe("HIGH");
+
+    expect(emailControl.calls).toHaveLength(1);
+    expect(emailControl.calls[0].subject).toContain("High-priority lead:");
+    expect(emailControl.calls[0].to).toEqual([memberEmail]);
+  });
+
+  it("sends no notification for MEDIUM or LOW qualification", async () => {
+    const mediumLeadId = await createLead({
+      name: "Medium Email Lead",
+      timeline: "ONE_TO_THREE_MONTHS",
+    });
+    const lowLeadId = await createLead({
+      name: "Low Email Lead",
+      timeline: "JUST_BROWSING",
+    });
+    emailControl.calls.length = 0;
+
+    expect((await qualify(mediumLeadId)).status).toBe("succeeded");
+    expect((await qualify(lowLeadId)).status).toBe("succeeded");
+
+    expect(emailControl.calls).toHaveLength(0);
+    expect(
+      await prisma.activity.count({
+        where: {
+          leadId: { in: [mediumLeadId, lowLeadId] },
+          type: "HOT_LEAD_NOTIFICATION_SENT",
+        },
+      }),
+    ).toBe(0);
+  });
+
+  it("does not send a duplicate notification for the same qualification", async () => {
+    const leadId = await createLead({
+      name: "Duplicate Email Lead",
+      timeline: "ONE_TO_THREE_MONTHS",
+      financingStatus: "CASH",
+    });
+    emailControl.calls.length = 0;
+    await qualify(leadId);
+    expect(emailControl.calls).toHaveLength(1);
+
+    const qualification = await prisma.leadQualification.findFirst({
+      where: { leadId, organizationId: secondOrganizationId },
+      select: { id: true },
+    });
+
+    const { notifyHotLeadIfNeeded } = await import(
+      "@/server/services/hot-lead-notification"
+    );
+    const outcome = await notifyHotLeadIfNeeded({
+      organizationId: secondOrganizationId,
+      leadId,
+      qualificationId: qualification!.id,
+    });
+    expect(outcome).toEqual({ status: "skipped", reason: "already_sent" });
+    expect(emailControl.calls).toHaveLength(1);
+    expect(
+      await prisma.activity.count({
+        where: {
+          leadId,
+          organizationId: secondOrganizationId,
+          type: "HOT_LEAD_NOTIFICATION_SENT",
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it("preserves the qualification and task when email delivery fails", async () => {
+    const leadId = await createLead({
+      name: "Email Failure Lead",
+      timeline: "ONE_TO_THREE_MONTHS",
+      financingStatus: "CASH",
+    });
+
+    emailControl.shouldFail = true;
+    try {
+      const outcome = await qualify(leadId);
+      expect(outcome.status).toBe("succeeded");
+
+      // Lead, qualification, and automatic follow-up task all survive.
+      expect(
+        await prisma.lead.count({
+          where: { id: leadId, organizationId: secondOrganizationId },
+        }),
+      ).toBe(1);
+      expect(
+        await prisma.leadQualification.count({
+          where: { leadId, organizationId: secondOrganizationId },
+        }),
+      ).toBe(1);
+      expect(
+        await prisma.followUpTask.count({
+          where: { leadId, organizationId: secondOrganizationId },
+        }),
+      ).toBe(1);
+
+      const failure = await prisma.activity.findFirst({
+        where: {
+          leadId,
+          organizationId: secondOrganizationId,
+          type: "HOT_LEAD_NOTIFICATION_FAILED",
+        },
+        select: { actorUserId: true, message: true, metadata: true },
+      });
+      expect(failure).not.toBeNull();
+      expect(failure?.actorUserId).toBeNull();
+      expect(failure?.message).toContain("PROVIDER_ERROR");
+      expect(failure?.message).not.toContain("test-key");
+      expect(metadataOf(failure?.metadata).provider).toBe("resend");
+
+      expect(
+        await prisma.activity.count({
+          where: { leadId, type: "HOT_LEAD_NOTIFICATION_SENT" },
+        }),
+      ).toBe(0);
+    } finally {
+      emailControl.shouldFail = false;
     }
   });
 });

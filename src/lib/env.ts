@@ -59,6 +59,23 @@ export function getDefaultPublicLeadOrgSlug(): string {
   return value && value.length > 0 ? value : "demo-realty";
 }
 
+export type ResendConfig = { apiKey: string; fromEmail: string };
+
+/**
+ * Optional Resend transactional-email configuration, read at call time.
+ *
+ * Returns null when email delivery is not configured, so the CRM keeps
+ * working without it. Read directly (like the public-lead slug helper) so it
+ * is not cached by `getServerEnv()` and can be resolved per send. The key is
+ * never logged or returned to callers other than the transport.
+ */
+export function getResendConfig(): ResendConfig | null {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const fromEmail = process.env.RESEND_FROM_EMAIL?.trim();
+  if (!apiKey || !fromEmail) return null;
+  return { apiKey, fromEmail };
+}
+
 let cachedServerEnv: ServerEnv | null = null;
 
 /**

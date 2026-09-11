@@ -300,6 +300,8 @@ Server-resolved inputs only
 → Create QUALIFICATION_GENERATED Activity with actorUserId
 → HIGH / URGENT only: create one automatic follow-up task
    (+ AUTO_FOLLOW_UP_CREATED Activity, best-effort — D-029)
+→ HIGH / URGENT only: send one hot-lead email notification
+   (+ HOT_LEAD_NOTIFICATION_SENT / _FAILED Activity, best-effort — D-030)
 → Return outcome
 
 `organizationId` must always come from trusted server code (an authenticated
@@ -353,6 +355,33 @@ qualification succeeded
 - due dates use server time: HIGH in 24 hours, URGENT in 2 hours
 - a task-creation failure never removes the qualification, lead, or activities
 - the rule uses only the server-trusted qualification result, never client input
+
+## HOT-LEAD EMAIL NOTIFICATIONS
+
+HIGH / URGENT leads also email the responsible CRM user (D-030):
+
+```
+qualification persisted
+→ resolve recipients (server-side, organization-scoped)
+→ send via the Resend HTTP transport
+→ HOT_LEAD_NOTIFICATION_SENT Activity
+```
+
+Recipient rule:
+
+1. the assigned user, only when they are a member of the lead's organization
+2. otherwise the organization's OWNER member(s)
+
+- recipients are never taken from a global env var, the public form, or the
+  request
+- `RESEND_API_KEY` (secret) and `RESEND_FROM_EMAIL` are optional; when unset,
+  nothing is sent and the CRM keeps working
+- delivery reuses the Activity ledger for idempotency
+  (`HOT_LEAD_NOTIFICATION_SENT` + a stable Resend `Idempotency-Key`)
+- it is best-effort: a 4xx/5xx/timeout/network failure never affects the lead,
+  qualification, follow-up task, or visitor submission, and records a safe
+  `HOT_LEAD_NOTIFICATION_FAILED` activity
+- at most one small retry for transient 5xx/network; 4xx and 429 are not retried
 
 ## AI PROVIDER ABSTRACTION
 
@@ -528,6 +557,8 @@ Examples:
 - qualification failed
 - qualification retried
 - automatic follow-up task created
+- hot-lead notification sent
+- hot-lead notification failed
 - AI draft edited
 - AI draft approved
 - AI draft rejected
@@ -589,9 +620,12 @@ Runtime AI:
 
 Configurable provider through environment variables
 
+Integrations in use:
+
+- Resend (hot-lead email notifications, D-030)
+
 Potential future integrations:
 
-- Resend
 - Twilio
 - Google Calendar
 - external CRM APIs

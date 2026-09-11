@@ -7,6 +7,7 @@ import {
   AiProviderError,
 } from "@/server/ai/provider-factory";
 import { createAutomaticFollowUpTaskIfNeeded } from "@/server/services/auto-follow-up-task";
+import { notifyHotLeadIfNeeded } from "@/server/services/hot-lead-notification";
 
 /**
  * Lead qualification workflow (TASKS.md T054 / T056).
@@ -26,8 +27,9 @@ import { createAutomaticFollowUpTaskIfNeeded } from "@/server/services/auto-foll
  * Flow (core): load lead scoped by organizationId → build qualification input
  * from approved fields → call the configured provider → Zod-validated result
  * → persist LeadQualification with provider/model metadata → Activity entry
- * → for HIGH/URGENT results, create one automatic follow-up task (T057,
- * best-effort; a task failure never invalidates the qualification).
+ * → for HIGH/URGENT results, create one automatic follow-up task (T057) and
+ *   send one best-effort agent email notification (T058); a failure of either
+ *   automation never invalidates the qualification.
  *
  * Failure handling (D-025): the lead is never modified or deleted by
  * qualification. Failures are recorded as an Activity entry and can be
@@ -88,7 +90,7 @@ export async function qualifyLeadForOrganization({
     const provider = getQualificationProvider();
     const result = await provider.qualify(input);
 
-    await prisma.leadQualification.create({
+    const qualification = await prisma.leadQualification.create({
       data: {
         organizationId,
         leadId: lead.id,
@@ -106,6 +108,7 @@ export async function qualifyLeadForOrganization({
         confidence: result.confidence,
         reviewState: "GENERATED",
       },
+      select: { id: true },
     });
 
     await prisma.activity.create({
@@ -122,6 +125,9 @@ export async function qualifyLeadForOrganization({
     // best-effort: the qualification is already safely persisted, so a task
     // failure must never turn a successful qualification into a failure. The
     // rule uses only the server-trusted result, never client input.
+    // Preferred order: qualification → activity → follow-up task → email.
+    // Each automation is independently best-effort, so a failure of one never
+    // affects the qualification or the other.
     if (result.priority === "HIGH" || result.priority === "URGENT") {
       try {
         await createAutomaticFollowUpTaskIfNeeded({
@@ -133,6 +139,17 @@ export async function qualifyLeadForOrganization({
       } catch {
         // Swallow: the qualification, lead, and existing activities are
         // intact and manual task creation remains available.
+      }
+
+      try {
+        await notifyHotLeadIfNeeded({
+          organizationId,
+          leadId: lead.id,
+          qualificationId: qualification.id,
+        });
+      } catch {
+        // Swallow: email delivery is best-effort and never affects the lead,
+        // the qualification, or the automatic follow-up task.
       }
     }
 

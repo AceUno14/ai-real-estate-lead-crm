@@ -717,3 +717,71 @@ Not chosen:
 - creating automatic tasks for LOW / MEDIUM leads
 - a schema migration or new column just to flag automatic tasks
 - a client-timezone scheduling system for the MVP
+
+## D-030 — Hot-Lead Email Notification (Resend)
+
+Status: Accepted
+
+Decision:
+
+When a HIGH / URGENT qualification succeeds, the responsible CRM user is
+emailed through Resend.
+
+```
+qualification persisted
+→ qualification activity
+→ automatic follow-up task attempt
+→ hot-lead email notification attempt
+→ human action
+```
+
+Recipient rule (server-side only, never from a global variable or the client):
+
+1. if `lead.assignedToUserId` is set **and** that user is a member of the
+   lead's organization → notify that user's email only
+2. otherwise → notify the organization's OWNER member(s)
+
+A stale/cross-tenant assignment falls through to the OWNER rule rather than
+emailing a user outside the workspace.
+
+Provider:
+
+- Resend, called through the HTTP API with `fetch` from a small server-only
+  transport (`src/server/services/resend-email.ts`); no SDK dependency
+- `RESEND_API_KEY` (secret) and `RESEND_FROM_EMAIL` (sender) are optional:
+  when unset, no email is sent and the CRM keeps working
+- `RESEND_API_KEY` is never logged, returned, or included in emails/errors
+
+Idempotency:
+
+- reuse the existing Activity ledger: `HOT_LEAD_NOTIFICATION_SENT` marks the
+  qualification as notified, with metadata `{ qualificationId, priority,
+  recipientCount, provider }`
+- before sending, the service checks whether a successful notification already
+  exists for that qualification
+- a stable Resend `Idempotency-Key` derived from the qualification id is sent as
+  an external backstop; the database check remains authoritative
+
+Failure isolation:
+
+- notification is best-effort and runs after the qualification, its activity,
+  and the follow-up task are persisted
+- a 4xx/5xx/timeout/network failure never affects the lead, qualification,
+  follow-up task, or visitor submission; it records a safe
+  `HOT_LEAD_NOTIFICATION_FAILED` activity
+- at most one small retry for transient 5xx / network failures; authentication,
+  configuration, and 429 responses are never retried
+
+Reason:
+
+A high-value lead is only useful if an agent sees it. Emailing the responsible
+user closes the loop from capture to action without adding a paid queue or SMS.
+
+Not chosen:
+
+- a global `ALERT_EMAIL_TO` recipient variable
+- accepting recipients from the public form or request
+- a schema migration (reuses `User.email`, `Membership`,
+  `Lead.assignedToUserId`, `Activity.type`, `Activity.metadata`)
+- a React Email / SDK dependency
+- SMS notifications

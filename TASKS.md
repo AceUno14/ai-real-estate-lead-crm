@@ -603,6 +603,39 @@ Rules:
 - task links the same trusted `organizationId` and `leadId`
 - no client-supplied priority or recommended action
 
+## T058 — Hot-Lead Email Notification (Resend)
+
+Status: [x]
+
+Progress note: HIGH/URGENT qualifications now email the responsible CRM user
+(D-030). Recipients are resolved server-side only: the assigned user when they
+belong to the lead's organization, otherwise the organization's OWNER members
+— never from a global env var and never from client input. Delivery uses a small
+server-only Resend HTTP transport (`src/server/services/resend-email.ts`) built
+on `fetch` (no SDK dependency), called from
+`src/server/services/hot-lead-notification.ts` after the automatic follow-up
+task in the qualification core. Idempotency reuses the Activity ledger
+(`HOT_LEAD_NOTIFICATION_SENT`, metadata includes qualificationId, priority,
+recipientCount, provider) plus a stable Resend `Idempotency-Key`. Email is
+best-effort: a failure never affects the lead, qualification, task, or visitor
+submission, and records a safe `HOT_LEAD_NOTIFICATION_FAILED` activity. One
+bounded retry for transient 5xx/network; no retry for 4xx/429.
+
+Scope:
+
+- Resend HTTP transport (timeout, bounded retry, idempotency key)
+- server-side recipient resolution (assigned user → OWNER fallback)
+- HTML + plain-text email with a lead detail link
+- activity-ledger idempotency + failure isolation
+- tests + documentation
+
+Security:
+
+- `organizationId`/`leadId` come from the trusted qualification workflow
+- recipients come from organization-scoped membership queries
+- `RESEND_API_KEY` stays server-side and is never logged or emailed
+- no cross-tenant recipients
+
 # PHASE 7 — DASHBOARD INSIGHTS
 
 ## T060 — Dashboard Metrics
@@ -870,6 +903,17 @@ Verified this session (T057 — automatic follow-up task for high-value leads):
 - cross-tenant task creation is impossible
 - a task-creation failure leaves the qualification, lead, and activities intact
 - manual create / complete / reopen continue to work; existing tests still pass
+
+Verified this session (T058 — hot-lead email notification):
+
+- HIGH and URGENT qualifications send exactly one notification; MEDIUM/LOW none
+- the assigned user receives it only when they belong to the organization
+- otherwise the organization's OWNER members receive it
+- members of other organizations never receive it
+- duplicate execution for one qualification sends nothing extra
+- a send failure keeps the lead, qualification, and automatic follow-up task,
+  and records a safe failure activity
+- the Resend idempotency key is stable per qualification
 
 Note: the application is deployed to Vercel with a Neon production database and
 Groq as the runtime AI provider. That state is user-reported; T080–T082 remain

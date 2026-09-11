@@ -12,6 +12,7 @@ Workspace-specific public lead
 → automatic AI qualification
 → lead score / priority / intent / recommended next action / draft reply
 → HIGH / URGENT lead → automatic follow-up task
+→ HIGH / URGENT lead → agent email notification (Resend)
 → human review and action
 → dashboard ranking and task workflow
 → lead status update
@@ -19,7 +20,8 @@ Workspace-specific public lead
 AI qualification also remains available manually from the lead detail page,
 which is the fallback whenever the provider is unavailable or rate limited.
 High-value leads (HIGH / URGENT) automatically receive one follow-up task so
-they appear in the task workflow without the agent remembering to create one.
+they appear in the task workflow without the agent remembering to create one,
+and the responsible agent is emailed so the lead is not missed.
 
 ## BUSINESS PROBLEM
 
@@ -193,6 +195,20 @@ page, ready for the agent to complete or reopen.
 - one automatic task per lead (repeated qualification cannot duplicate it)
 - a task-creation failure never removes the qualification or the lead, and
   manual task creation stays available
+
+### Hot-Lead Email Notifications
+
+When a HIGH or URGENT qualification succeeds, the responsible CRM user is
+emailed through Resend.
+
+- recipient rule (server-side only): the assigned user when they belong to the
+  lead's organization, otherwise the organization's OWNER member(s)
+- recipients are never taken from a global env var or from the client
+- one notification per qualification (Activity ledger + Resend idempotency key)
+- email is best-effort: a failure never affects the lead, qualification,
+  follow-up task, or submission, and is recorded in the activity timeline
+- configured with `RESEND_API_KEY` and `RESEND_FROM_EMAIL`; when unset, no email
+  is sent and the CRM keeps working
 
 ### Human Review
 
@@ -439,9 +455,10 @@ qualification on public lead capture: Next.js 16 + Prisma 7 foundation,
 credentials authentication, self-service workspace provisioning on sign-up,
 organization/tenant isolation, workspace-specific public lead capture
 (`/lead/[organizationSlug]`) with automatic post-response AI qualification and
-automatic follow-up tasks for HIGH/URGENT leads, lead CRM
-(list/detail/status/notes/tasks), AI qualification with mock provider + human
-review, dashboard metrics and contact-first ranking, and a 95-test baseline.
+automatic follow-up tasks and Resend email notifications for HIGH/URGENT
+leads, lead CRM (list/detail/status/notes/tasks), AI qualification with mock
+provider + human review, dashboard metrics and contact-first ranking, and a
+116-test baseline.
 
 The initial migration is applied and verified against the configured PostgreSQL/Neon database, and the seed has been run. Verification covers: migration state in sync, idempotent seed, authentication round trip, organization/tenant isolation and cross-tenant rejection, public lead persistence, lead list/detail rendering from persisted records, status/notes/follow-up-task/activity mutations, and mock AI qualification success, failure recovery, and human review.
 
@@ -451,7 +468,7 @@ Still open (see TASKS.md): production database (T080), Vercel deployment (T081),
 
 ```bash
 # 1. Configure environment (never commit secrets)
-cp .env.example .env      # then set DATABASE_URL and AUTH_SECRET
+cp .env.example .env      # set DATABASE_URL and AUTH_SECRET (and optionally RESEND_API_KEY / RESEND_FROM_EMAIL)
 
 # 2. Apply migrations and seed fictional demo data
 npx prisma migrate dev
