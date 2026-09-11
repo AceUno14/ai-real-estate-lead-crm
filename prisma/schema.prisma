@@ -1,0 +1,215 @@
+// Prisma schema — AI Real Estate Lead CRM
+//
+// Prisma 7 layout:
+// - the datasource URL lives in prisma.config.ts (from the environment)
+// - the client is generated into src/generated/prisma (gitignored)
+//
+// Models:
+// - User, Organization, Membership (auth + tenancy, T012/T013)
+// - Lead, LeadQualification, LeadNote, FollowUpTask, Activity (CRM, T020)
+//
+// Every workspace-owned CRM table carries organizationId directly so that
+// protected queries can always filter by organization (ARCHITECTURE.md,
+// DECISIONS.md D-005).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Authentication and tenancy
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String       @id @default(cuid())
+  name         String
+  email        String       @unique
+  passwordHash String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  memberships    Membership[]
+  assignedLeads  Lead[]       @relation("LeadAssignee")
+  authoredNotes  LeadNote[]   @relation("LeadNoteAuthor")
+  activities     Activity[]   @relation("ActivityActor")
+}
+
+enum MembershipRole {
+  OWNER
+  MEMBER
+}
+
+model Organization {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  memberships     Membership[]
+  leads           Lead[]
+  qualifications  LeadQualification[]
+  notes           LeadNote[]
+  followUpTasks   FollowUpTask[]
+  activities      Activity[]
+}
+
+model Membership {
+  id             String         @id @default(cuid())
+  userId         String
+  organizationId String
+  role           MembershipRole @default(MEMBER)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+// ---------------------------------------------------------------------------
+// CRM core
+// ---------------------------------------------------------------------------
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  NURTURING
+  WON
+  LOST
+}
+
+model Lead {
+  id                String     @id @default(cuid())
+  organizationId    String
+  name              String
+  email             String
+  phone             String?
+  inquiryType       String
+  propertyType      String?
+  preferredLocation String
+  budgetMin         Int?
+  budgetMax         Int?
+  timeline          String?
+  financingStatus   String?
+  message           String
+  source            String?
+  status            LeadStatus @default(NEW)
+  assignedToUserId  String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignedTo     User?                @relation("LeadAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  qualifications LeadQualification[]
+  notes          LeadNote[]
+  followUpTasks  FollowUpTask[]
+  activities     Activity[]
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, status])
+  @@index([organizationId, assignedToUserId])
+}
+
+enum LeadPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum QualificationReviewState {
+  GENERATED
+  EDITED
+  APPROVED
+  REJECTED
+}
+
+model LeadQualification {
+  id                String                    @id @default(cuid())
+  organizationId    String
+  leadId            String
+  provider          String
+  model             String
+  score             Int
+  priority          LeadPriority
+  intent            String
+  summary           String
+  timeline          String
+  budgetReadiness   String
+  financingStatus   String
+  recommendedAction String
+  draftReply        String
+  confidence        Float
+  reviewState       QualificationReviewState  @default(GENERATED)
+  errorMessage      String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+  @@index([organizationId])
+}
+
+model LeadNote {
+  id             String   @id @default(cuid())
+  organizationId String
+  leadId         String
+  authorUserId   String?
+  content        String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  author       User?        @relation("LeadNoteAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, createdAt])
+  @@index([organizationId])
+}
+
+model FollowUpTask {
+  id             String    @id @default(cuid())
+  organizationId String
+  leadId         String
+  title          String
+  description    String?
+  dueDate        DateTime
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, dueDate])
+  @@index([leadId])
+}
+
+model Activity {
+  id             String   @id @default(cuid())
+  organizationId String
+  leadId         String
+  actorUserId    String?
+  type           String
+  message        String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  actor        User?        @relation("ActivityActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([leadId, createdAt])
+}
