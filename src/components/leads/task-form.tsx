@@ -23,7 +23,7 @@ export function TaskForm({ leadId }: { leadId: string }) {
   );
 
   return (
-    <form ref={formRef} action={formAction} className="mt-4 space-y-2">
+    <form ref={formRef} action={formAction} className="space-y-2">
       <input type="hidden" name="leadId" value={leadId} />
       <div>
         <label htmlFor="task-title" className="sr-only">
@@ -36,11 +36,14 @@ export function TaskForm({ leadId }: { leadId: string }) {
           required
           maxLength={200}
           placeholder="e.g. Call to arrange viewing"
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-900 focus:outline-none"
+          className="h-9 w-full rounded-md border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-faint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
         />
       </div>
-      <div className="flex items-center gap-2">
-        <label htmlFor="task-due" className="text-xs text-slate-500">
+      <div className="flex flex-wrap items-center gap-2">
+        <label
+          htmlFor="task-due"
+          className="text-[11px] font-medium uppercase tracking-wide text-faint"
+        >
           Due
         </label>
         <input
@@ -48,18 +51,18 @@ export function TaskForm({ leadId }: { leadId: string }) {
           name="dueDate"
           type="date"
           required
-          className="rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-slate-900 focus:outline-none"
+          className="h-9 rounded-md border border-line-strong bg-surface px-2.5 text-sm tabular-nums text-ink focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
         />
         <button
           type="submit"
           disabled={pending}
-          className="ml-auto rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
+          className="ml-auto inline-flex min-h-9 items-center justify-center rounded-md bg-navy px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-navy-strong disabled:opacity-60"
         >
           {pending ? "Adding…" : "Add task"}
         </button>
       </div>
       {state.error ? (
-        <p role="alert" className="text-xs text-red-600">
+        <p role="alert" className="text-xs text-danger">
           {state.error}
         </p>
       ) : null}

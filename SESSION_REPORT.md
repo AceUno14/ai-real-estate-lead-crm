@@ -1001,3 +1001,560 @@ Set `RESEND_API_KEY` and `RESEND_FROM_EMAIL` in the Vercel project (and verify
 the sending domain in Resend), deploy, then submit a HIGH/URGENT inquiry at
 `/lead/esmael-realty` and confirm exactly one alert email arrives and a
 `HOT_LEAD_NOTIFICATION_SENT` activity appears on the lead.
+
+---
+
+# FOLLOW-UP SESSION — UI/UX SPRINT: PREMIUM CRM INTERFACE
+
+Session date: 2026-09-12
+
+Scope: one-hour focused UI/UX sprint. Visual and interaction redesign only —
+no business logic, database behavior, authentication, AI qualification, email
+notification, or tenant-isolation changes. No deployment.
+
+## OBJECTIVE
+
+Transform the generic admin-template interface into a polished, premium
+real-estate sales operations CRM. The visual experience should answer
+"Which leads need my attention right now?" instead of reading as a generic
+SaaS dashboard.
+
+## SCOPE CONSTRAINTS OBSERVED
+
+- No business logic, database, auth, AI, email, or tenant-isolation changes.
+- Lead detail, tasks, settings, public inquiry form, and sign-in/up pages were
+  not redesigned (later UI phases); only a palette-token swap was applied to
+  tasks/settings/error/loading surfaces inside the dashboard shell so they do
+  not clash with the new theme.
+- No unrelated refactors; filtering/query behavior on /leads is byte-identical.
+- Exactly one new dependency (`lucide-react`, icons).
+
+## DESIGN SYSTEM (PHASE A)
+
+`src/app/globals.css` now defines all color as Tailwind v4 `@theme` design
+tokens — the single source of truth. Components use generated utilities
+(`bg-surface`, `text-ink`, `border-line`, `bg-sidebar`, ...) instead of raw hex.
+
+- Surfaces: warm off-white background `#f6f5f2`, crisp white surface,
+  muted inset surface for table heads/hovers.
+- Text: ink / ink-secondary / muted / faint hierarchy.
+- Borders: subtle neutral `line` / `line-strong`.
+- Sidebar: deep navy palette (`#10233c` base, raised hover, active route,
+  separators, muted/strong text).
+- Accent: restrained navy (`#16324f`) replaces bright-blue/slate-900 CTAs.
+- Semantic: emerald success, amber warning, red danger (urgent only), each
+  with a soft background variant.
+- Inter loaded via `next/font` and wired through `--font-sans`.
+- Global `:focus-visible` ring, a `focus-light` variant for navy surfaces,
+  and a `prefers-reduced-motion` guard.
+
+## APP SHELL (PHASE B)
+
+`src/app/(dashboard)/layout.tsx` redesigned:
+
+- Desktop: fixed ~256px navy sidebar — compact product identity
+  ("Lead Estate / Sales operations"), workspace name, Dashboard / Leads /
+  Tasks / Settings with icons, obvious active route via `aria-current="page"`
+  and a filled background, refined hover states, account footer (initials
+  avatar, name, workspace, quiet sign-out).
+- Mobile: compact navy header with hamburger drawer
+  (`src/components/ui/mobile-menu.tsx`) — body scroll lock, Escape closes,
+  focus returns to the toggle, 44px tap targets, backdrop close.
+- The server-side organization guard (`requireActiveOrganization()`) is
+  unchanged.
+- Active-route resolution lives in `src/components/ui/nav-links.tsx`
+  (`usePathname`), shared by sidebar and drawer.
+
+## DASHBOARD (PHASE C)
+
+Reworked hierarchy using only existing data (`getDashboardMetrics`,
+`getTopLeadsToContact`, `getRecentActivity` — untouched):
+
+1. Page title + operational subtitle (workspace name).
+2. Primary attention area: three linked tiles — Urgent (danger tone),
+   High priority (warning tone), Follow-ups due (warning tone); neutral
+   styling when zero.
+3. Secondary metrics: total leads, new leads, average AI score
+   (MetricCard now supports tone accents and tabular numerals).
+4. Main content: "Who should I contact first?" is the strongest section —
+   ranked rows with rank chips, obviously clickable lead names (hover
+   underline on a full-row target), priority badge, color-coded score,
+   AI summary, and recommended next action.
+5. Supporting: leads-by-status bar breakdown (token-accented) and a
+   recent-activity feed.
+
+No fake data and no new backend queries.
+
+## LEADS LIST (PHASE D)
+
+- Filter toolbar consolidated into a white card: labeled controls with
+  consistent heights, search icon input, active-filter count on Apply.
+- Table: denser rows, name + email hierarchy in one cell, consistent token
+  badges, inline AI-score meters (color-coded bar, lg+), right-aligned
+  tabular dates, stretched-link rows (entire row clickable).
+- Mobile (<640px): compact card list with score, badges, source/location,
+  and chevron — no forced wide-table scrolling.
+- Useful empty state distinguishing "no leads yet" from "no matches for
+  these filters".
+- Search/status/source/sort/pagination logic unchanged.
+
+## RESPONSIVE + ACCESSIBILITY (PHASE E)
+
+- 1440px: max-width content column beside the fixed sidebar.
+- ~1024px: table retained; score bars hidden to reduce density.
+- ~390px: drawer nav, card list, stacked toolbar; tables scroll only within
+  their card; no horizontal overflow (`overflow-x: hidden` retained).
+- Visible focus states everywhere (navy ring on light surfaces, light ring
+  on navy), semantic `<nav aria-label>` / `<section aria-labelledby>`,
+  `aria-current`, `aria-expanded`/`aria-controls` on the menu toggle, labeled
+  icon-only buttons, decorative icons/bars `aria-hidden`, status/date text
+  lifted above AA contrast, reduced-motion respected.
+
+## DEPENDENCIES
+
+- `lucide-react` — the only new dependency (navigation and affordance icons).
+
+## VERIFICATION
+
+```
+npm run typecheck   # clean
+npm run lint        # clean (0 errors, 0 warnings)
+npm test            # 116 passed / 116 (13 files)
+npm run build       # clean; all routes compile
+```
+
+## FILES CHANGED (THIS SESSION)
+
+| File | Change |
+| --- | --- |
+| `src/app/globals.css` | Token-based design foundation (Tailwind v4 `@theme`) |
+| `src/app/layout.tsx` | Inter via `next/font` |
+| `src/app/(dashboard)/layout.tsx` | Navy sidebar shell + mobile header |
+| `src/components/ui/nav-links.tsx` | New shared icon nav with active-route state |
+| `src/components/ui/mobile-menu.tsx` | New accessible mobile drawer |
+| `src/components/ui/sign-out-button.tsx` | Quiet navy-surface sign-out |
+| `src/components/ui/page-header.tsx` | Token restyle, hierarchy |
+| `src/components/dashboard/metric-card.tsx` | Tone accents, accent bar, tabular numerals |
+| `src/components/leads/badges.tsx` | Token-based status/priority badge styles |
+| `src/app/(dashboard)/dashboard/page.tsx` | Attention-first dashboard redesign |
+| `src/app/(dashboard)/leads/page.tsx` | Toolbar, dense table, score meters, mobile cards, empty state |
+| `src/app/(dashboard)/tasks/page.tsx` | Palette-token swap only |
+| `src/app/(dashboard)/settings/page.tsx` | Palette-token swap only |
+| `src/app/(dashboard)/error.tsx` | Token restyle |
+| `src/app/(dashboard)/dashboard/loading.tsx` | Skeleton updated to tokens/layout |
+| `src/app/(dashboard)/leads/loading.tsx` | Skeleton updated to tokens |
+| `package.json` / `package-lock.json` | Add `lucide-react` |
+| `TASKS.md` | T072 UI sprint note |
+| `SESSION_REPORT.md` | This section |
+
+## NOT CHANGED
+
+Lead detail page, sign-in/sign-up, public inquiry form, marketing page,
+server services/actions, Prisma schema/queries, AI qualification, Resend
+email flow, tenant isolation, and `requireActiveOrganization`. Remaining
+`slate-*` classes exist only in pages excluded from this sprint.
+
+## BLOCKERS
+
+None. Deployment was not run (as instructed).
+
+## NEXT UI PHASE
+
+Lead detail page redesign (profile, qualification panel, notes, tasks,
+activity timeline) — the highest-traffic remaining surface still on the old
+palette — followed by the auth screens and the public inquiry form.
+
+---
+
+# FOLLOW-UP SESSION — UI/UX PHASE 2: LEAD DETAIL REDESIGN
+
+Session date: 2026-09-12
+
+Scope: one-hour focused UI sprint on the lead detail experience. Visual and
+interaction redesign only — no business logic, database behavior,
+authentication, AI qualification, automatic qualification, automatic
+follow-up creation, Resend notifications, lead mutations, API behavior, or
+tenant-isolation changes. No deployment.
+
+## OBJECTIVE
+
+Make `/leads/[leadId]` the strongest workflow page in the CRM. It should
+answer immediately: who is this lead, how valuable/urgent are they, what
+does the AI recommend, what should the agent do next, and what has already
+happened. Reuses the Phase 1 design system (tokens, typography, spacing,
+navy accent, semantic colors) — no second visual system.
+
+## WHAT CHANGED (BY PHASE)
+
+- **Lead header (A)** — `LeadHeader`: name as primary title with email and
+  relative received time, status/priority/AI-score/assignment strip, and
+  the existing status/assignment actions secondary to the identity.
+  HIGH/URGENT leads are instantly recognizable via a left accent bar
+  (amber HIGH, red URGENT) plus a red "Urgent" chip on URGENT only.
+- **Contact & inquiry (B)** — `LeadSummary` + `MetaItem`: icon contact
+  block (mail/phone as real links, location), emphasized sales fields
+  (budget via `formatBudgetRange`, timeline, financing, location),
+  remaining inquiry context, then the message. No flat form grid.
+- **AI qualification (C)** — `QualificationPanel`: score/100 with
+  color-coded meter (emerald 80+, navy 60+, muted below), confidence,
+  priority badge, summary, four signal fields, and a prominent navy-soft
+  "Recommended next action" callout. The draft reply is clearly labeled
+  "AI-generated" with review state, readable editor, Save edit / Approve /
+  Reject, and obvious locked-state feedback. Pending, failed-with-retry,
+  and not-qualified states are polished and clearly distinguished.
+- **Follow-up tasks (D)** — `FollowUpPanel`: task title, due label
+  (Today/Tomorrow + time), overdue (red) vs due-soon (amber) vs later,
+  completed state with reopen, complete/reopen control at 44px, overdue
+  count in the header, and the manual title+date+Add form.
+- **Activity timeline (E)** — `ActivityTimeline`: per-type markers
+  (created, qualification generated/failed, auto follow-up, hot-lead
+  sent/failed, notes, status changes, draft edited/approved/rejected,
+  follow-up complete/reopen), color-coded tones, system/actor context,
+  relative timestamps with `<time>`, vertical connector, graceful
+  fallback for unknown activity types.
+- **Notes (F)** — comfortable composer, scannable note cards with author +
+  timestamp, dashed empty state.
+- **Layout** — desktop 2/3 main column (summary, qualification, notes) +
+  1/3 right rail (tasks, activity); single column at mobile widths with
+  wrapping header actions and no horizontal overflow.
+- **Token migration** — the interactive forms used by this page
+  (`qualification-panel.tsx`, `status-update-form.tsx`, `assign-button.tsx`,
+  `note-form.tsx`, `task-form.tsx`, `task-toggle.tsx`) moved from
+  `slate-*` classes to the design tokens (navy primary, semantic
+  approve/reject, 44px-ish controls). No mutation behavior changed; the
+  server actions and their `revalidatePath` targets are untouched.
+
+## FILES CHANGED (THIS SESSION)
+
+| File | Change |
+| --- | --- |
+| `src/components/leads/detail-section.tsx` | New `DetailSection` / `MetaItem` / `NoValue` / `SubHeading` primitives |
+| `src/components/leads/lead-header.tsx` | New lead header with priority accent bar |
+| `src/components/leads/lead-summary.tsx` | New contact + inquiry summary |
+| `src/components/leads/qualification-section.tsx` | New central AI qualification panel |
+| `src/components/leads/follow-up-panel.tsx` | New follow-up tasks panel |
+| `src/components/leads/activity-timeline.tsx` | New activity timeline feed |
+| `src/lib/format.ts` | New formatting helpers (relative time, due labels, budget range) |
+| `src/app/(dashboard)/leads/[leadId]/page.tsx` | Rebuilt composition: header + 2/3–1/3 layout; queries unchanged |
+| `src/components/leads/qualification-panel.tsx` | Token restyle + AI-generated labeling (client actions unchanged) |
+| `src/components/leads/status-update-form.tsx` | Token restyle |
+| `src/components/leads/assign-button.tsx` | Token restyle |
+| `src/components/leads/note-form.tsx` | Token restyle |
+| `src/components/leads/task-form.tsx` | Token restyle |
+| `src/components/leads/task-toggle.tsx` | Token restyle, larger tap target |
+| `TASKS.md` | T042 + T072 UI Phase 2 notes |
+| `SESSION_REPORT.md` | This section |
+
+## BUSINESS LOGIC CHANGED
+
+None. Same Prisma queries (the task list now orders by `completedAt,`
+`dueDate` for pending-first display — presentation ordering only), same
+server actions, same validation, same tenant scoping, same qualification
+and notification behavior.
+
+## VERIFICATION
+
+```
+npm run typecheck   # clean
+npm run lint        # clean (0 errors, 0 warnings)
+npm test            # 116 passed / 116 (13 files)
+npm run build       # clean; all routes compile
+```
+
+Production-build smoke test: signed in with the seeded demo owner, loaded
+/leads, opened a lead detail page (200), verified all sections render in
+both the pending state and the qualified state (score, confidence,
+recommended action, labeled draft review), confirmed zero `slate-*`
+classes on the page, semantic section landmarks with `aria-labelledby`,
+`<time>` timestamps, and the unauthenticated 307 redirect. Test data
+created during the smoke test (one mock qualification, its activities,
+and its automatic task) was removed afterwards so the seed dataset is
+unchanged. The pre-existing dev server on port 3000 had a stale database
+connection unrelated to this work (live tests against the same database
+all passed).
+
+## DEPENDENCIES
+
+None added. Icons use the already-installed `lucide-react`.
+
+## BLOCKERS
+
+None. Deployment was not run (as instructed).
+
+## NEXT UI PHASE
+
+Public inquiry form + authentication experience: the workspace-specific
+public lead form (`/lead/[organizationSlug]`), sign-in, and sign-up are
+the last major surfaces on the old palette. Follow with the marketing
+page last.
+
+---
+
+# FOLLOW-UP SESSION — UI/UX PHASE 3: PUBLIC INQUIRY + AUTHENTICATION
+
+Session date: 2026-09-12
+
+Scope: visual and interaction redesign of the public lead capture page, the
+lead form, the success state, sign-in, and sign-up. No business logic,
+database behavior, public lead routing, workspace resolution, Zod schemas,
+tenant isolation, authentication behavior, sign-up provisioning, AI
+qualification, automatic follow-up creation, Resend email, server actions,
+or environment changes. No deployment.
+
+UI PHASE 3 STATUS: Complete — all surfaces verified (typecheck, lint,
+tests, build, production-render smoke test).
+
+PUBLIC INQUIRY:
+`/lead/[organizationSlug]` rebuilt as a two-column premium layout (5fr/7fr).
+LEFT (desktop): navy brand panel echoing the dashboard sidebar — brokerage
+name with the house mark, headline "Tell us what you're looking for.",
+supporting copy, and three restrained trust/value points (Personalized
+property matching, Reviewed by an agent, Simple secure inquiry) using
+lucide icons only — no testimonials, names, awards, or response guarantees.
+RIGHT: compact brokerage chip (mobile) + intro header, then the white form
+card. Unknown/malformed slugs still 404; the slug is still bound server-side.
+
+FORM UX:
+All existing fields and server behavior preserved. Fields grouped into
+Contact / Property goal / Budget & readiness / Details sections with
+uppercase legend headings. Consistent 44px (mobile) → 40px (sm+) controls,
+styled selects (custom chevron), explicit required marks vs "(optional)"
+suffixes, useful helper text only (phone, budget, password), full-width
+navy CTA with a spinner pending state, and a token-based error alert
+(`aria-live` via role="alert"). Validation rules unchanged.
+
+SUCCESS STATE:
+Plain green alert replaced with a polished confirmation panel: emerald
+CheckCircle2 icon, "Inquiry received" heading, calm explanation naming the
+brokerage, and a numbered "What happens next" card (review → contact →
+next steps). No specific response time is promised.
+
+SIGN-IN:
+Rebuilt on shared AuthShell/AuthCard: navy left brand panel (desktop) with
+"Welcome back" + "Sign in to manage leads, follow-ups, and AI-qualified
+opportunities.", compact brand strip on mobile, white card with clean
+email/password fields (show/hide toggle), strong navy Sign in button with
+spinner, professional danger-toned error state, subtle "Create one" link.
+
+SIGN-UP:
+Same shell, copy communicating workspace provisioning: "Create your
+account and we'll set up your real-estate workspace." Password helper
+("At least 8 characters."), show/hide toggle, spinner submit state, note
+that sign-up creates the initial workspace with the user as owner, and a
+calm "Workspace ready" success state linking to sign in. Provisioning flow
+(D-026) untouched. No onboarding wizard.
+
+SHARED COMPONENTS:
+Extracted only where duplication was real: `src/components/ui/auth-shell.tsx`
+(AuthShell, AuthCard, BrandMark) and `src/components/ui/form-field.tsx`
+(fieldClass/labelClass/help/error classes, FieldGroup, TextField,
+SelectField, TextareaField, PasswordField). The lead form keeps its own
+grouped markup rather than being over-componentized.
+
+MOBILE:
+390px: single column, no horizontal overflow (max-w-xl content, stacked
+grids, full-width CTA, 44px touch targets). 1024px: two-column layout
+active, comfortable gutters. 1440px: capped content column, generous
+panel padding. `overflow-x: hidden` retained globally.
+
+ACCESSIBILITY:
+Real labels on every control (id/htmlFor), required/error wiring via
+aria-invalid + aria-describedby, visible focus-visible rings, semantic
+headings (h1 panel / h2 card / h2 success), role="status" on success
+panels (aria-live polite), role="alert" on errors, aria-hidden decorative
+icons, reduced-motion guard already global, keyboard-navigable show/hide
+password toggle with aria-pressed, decorative aside panels aria-hidden.
+
+FILES CHANGED:
+| File | Change |
+| --- | --- |
+| `src/app/(marketing)/lead/[organizationSlug]/page.tsx` | Two-column public inquiry redesign |
+| `src/app/(marketing)/lead/lead-form.tsx` | Grouped form UX + success panel; optional organizationName prop |
+| `src/app/(auth)/sign-in/page.tsx` | AuthShell/AuthCard redesign |
+| `src/app/(auth)/sign-in/sign-in-form.tsx` | Shared fields, spinner, token error state |
+| `src/app/(auth)/sign-up/page.tsx` | AuthShell/AuthCard redesign with provisioning copy |
+| `src/app/(auth)/sign-up/sign-up-form.tsx` | Password UX, spinner, workspace-ready success state |
+| `src/components/ui/auth-shell.tsx` | New: AuthShell, AuthCard, BrandMark |
+| `src/components/ui/form-field.tsx` | New: shared field primitives |
+| `TASKS.md` | T072 UI Phase 3 note |
+| `SESSION_REPORT.md` | This section |
+
+DEPENDENCIES:
+None added. Icons use the already-installed `lucide-react`.
+
+TESTS:
+No new tests — UI-only change; all 116 existing tests still pass (one
+transient live-database timeout against Neon re-ran green; unrelated to
+this work, which touches no server code).
+
+VERIFICATION:
+```
+npm run typecheck   # clean
+npm run lint        # clean
+npm test            # 116 passed / 116 (13 files)
+npm run build       # clean; /sign-in and /sign-up now prerender static
+```
+Production-build smoke test (render only, no submissions, no data created):
+/lead/demo-realty 200 (brand panel, trust points, form card render),
+/lead/not-a-real-workspace 404, /sign-in 200, /sign-up 200,
+/dashboard unauthenticated 307. Test server stopped afterwards.
+
+BUSINESS LOGIC CHANGED:
+None. Same server actions, same Zod schemas, same slug binding/resolution,
+same provisioning transaction, same authentication behavior, same
+qualification/notification chain.
+
+NEXT UI PHASE:
+Final polish — Tasks page, Settings page, and the marketing/home page on
+the shared token system, then a visual consistency audit (grep for stray
+slate-* classes), mobile QA pass, and final production screenshots for
+T091. Do not deploy as part of the UI work.
+
+---
+
+# FOLLOW-UP SESSION — UI/UX PHASE 4: FINAL POLISH + CONSISTENCY AUDIT
+
+Session date: 2026-09-12
+
+Scope: visual redesign of the tasks page, settings page, and marketing home
+page, plus a full visual consistency, mobile, and accessibility audit. No
+business logic, database behavior, authentication, tenant isolation, public
+lead routing, workspace resolution, AI qualification, automatic follow-up
+creation, Resend email, server actions, API behavior, or environment
+changes. No deployment.
+
+UI PHASE 4 STATUS: Complete — remaining surfaces redesigned, consistency
+audit clean, all checks verified.
+
+TASKS:
+`/tasks` rebuilt as a workflow page answering "What do I need to do next?".
+TOP: title + operational subtitle, then compact count chips (pending,
+overdue in a danger tone, due-within-24h in a warning tone — chips render
+only when there is data). MAIN: pending tasks ranked overdue → due within
+24h → future (presentation-only sort; the Prisma query is unchanged);
+overdue rows carry a red left accent bar + soft red background, an
+"Overdue" chip, and red due time; due-soon gets amber emphasis; the rest
+stay neutral (no excessive red). Lead names are navy links, the complete/
+reopen control is unchanged, and TaskToggle now meets the 44px mobile
+touch target (40px from md). SECONDARY: completed tasks are visually
+quieter (muted, line-through, smaller rows). New empty state explains that
+HIGH/URGENT qualifications create tasks automatically. Removed the last
+`text-slate-400` remnant.
+
+SETTINGS:
+`/settings` is now a polished read-only overview with three card sections:
+WORKSPACE (name, slug in mono, role as a chip, scoped-data note), ACCOUNT
+(name, email), and PUBLIC INQUIRY PAGE — the server-derived public lead URL
+(`${publicEnv.NEXT_PUBLIC_APP_URL}/lead/<slug>`, the same browser-safe
+variable the hot-lead email uses, never a secret) in a copy-friendly code
+block with an "Open page" link and per-workspace isolation note. No
+editable settings, mutations, billing, or fake toggles were added.
+
+MARKETING HOME:
+`/` redesigned as a concise portfolio landing page. HERO: eyebrow
+"AI-powered real estate lead operations", headline "Know which lead to
+contact first.", the requested supporting copy, primary auth-aware CTA
+(server-side `getSessionUser` → "Open dashboard" or "Sign in"), secondary
+"Submit a test inquiry" CTA (routes through the existing safe `/lead`
+redirect — no hardcoded production workspace), and an honest
+portfolio-demo note. WORKFLOW: the actual implemented chain as a 7-step
+numbered grid (Inquiry → AI qualification → Score + priority → Recommended
+next action → Follow-up task → Hot-lead email alert → Human review).
+FEATURES: only real capabilities (workspace-specific capture, AI
+qualification, contact-first ranking, follow-up tasks, email alerts,
+notes/activity history, tenant-isolated workspaces) with check icons. No
+SMS, outbound-reply, listing-integration, analytics, or fake-stat claims.
+Footer carries the human-review principle and auth links.
+
+CONSISTENCY AUDIT:
+Grepped all of src/ for slate-*, raw hex in TSX, old green/red/amber/blue/
+yellow Tailwind classes, and old card patterns. Results: zero old-palette
+classes remain — the only "slate-" matches were `translate-*` false
+positives (kept; they are transforms, not colors), the tasks page's
+`text-slate-400` was migrated, and `/no-organization` was the last
+old-palette page and is now on the token system with a Building2 icon.
+Border radius (rounded-lg cards / rounded-md controls / rounded-full
+chips), button heights, input styles, and badge styles are consistent
+across surfaces.
+
+MICRO UX POLISH:
+TaskToggle 44px mobile target; consistent section-head pattern (bordered
+card header + muted subtitle) applied to tasks/settings matching dashboard;
+count chips use tabular numerals; empty states distinguish "nothing to do"
+from "no matches" patterns; the home header truncates the product name and
+shortens "Submit an inquiry" to "Inquiry" below sm to avoid overflow.
+
+MOBILE QA (code-level, token-safe patterns):
+390px: tasks/settings/home are single-column stacks; count chips wrap;
+home header CTA labels shorten; settings public-URL code block uses
+break-all; no horizontal overflow (global overflow-x hidden retained).
+1024px: settings two-column grid; home workflow 4-col → 2-col; dashboard
+retains its Phase 1/2 layouts. 1440px: max-w-6xl content cap. Auth/
+inquiry pages verified in Phase 3. No desktop-only information is lost on
+mobile (all sections stack, none hidden).
+
+ACCESSIBILITY:
+Heading hierarchy: one h1 per page (tasks/settings use PageHeader h1;
+section h2s with aria-labelledby). Landmarks: header/nav/main/footer on
+home with aria-label="Main"; sections labelled. Count chips use role=
+"list"/"listitem" with icon-only decorations aria-hidden; decorative
+icons aria-hidden throughout; focus-visible rings via global styles and
+focus-light on interactive text; overdue/due-soon emphasis pairs color
+with text/chips (not color alone); reduced-motion guard retained.
+
+FILES CHANGED:
+| File | Change |
+| --- | --- |
+| `src/app/(dashboard)/tasks/page.tsx` | Workflow redesign: count chips, overdue/due-soon ranking, empty state |
+| `src/app/(dashboard)/settings/page.tsx` | Workspace/Account/Public-inquiry card sections |
+| `src/app/page.tsx` | Portfolio landing page: hero, workflow chain, real features, auth-aware CTA |
+| `src/app/no-organization/page.tsx` | Token-system migration (last old-palette page) |
+| `src/components/leads/task-toggle.tsx` | 44px mobile touch target |
+| `TASKS.md` | T072 UI Phase 4 note |
+| `SESSION_REPORT.md` | This section |
+
+DEPENDENCIES:
+None added. Icons use the already-installed `lucide-react` (CalendarClock,
+ListTodo, ExternalLink, Activity, BellRing, Building2, ClipboardList,
+Gauge, Sparkles verified present).
+
+TESTS:
+No new tests — UI-only change; 116/116 existing tests pass (13 files).
+
+VERIFICATION:
+```
+npm run typecheck   # clean
+npm run lint        # clean (fixed Date.now render-purity error + unused import)
+npm test            # 116 passed / 116 (13 files)
+npm run build       # clean; / now dynamic (auth-aware CTA)
+```
+Production-render smoke test (no data created, no submissions):
+/ 200 with hero + workflow + features rendered; /sign-in 200; /sign-up 200;
+/lead/demo-realty 200 (brand panel + form intact); /lead/not-a-real-
+workspace 404; unauthenticated /dashboard, /tasks, /settings all 307 to
+sign-in. Test server stopped afterwards.
+
+BUSINESS LOGIC CHANGED:
+None. Same Prisma query on /tasks (presentation-only sort added in the
+page), same org-scoped reads, same server actions, same auth behavior.
+
+REMAINING UI ISSUES:
+None blocking. Recommended during deployment QA (not UI blockers): real-
+device pass at 390/1024/1440 per T082, and replacing the seed product name
+"Lead Estate" if a different brand name is wanted before publishing.
+
+READY FOR DEPLOYMENT:
+Yes — from a UI perspective. Deployment itself remains a user action
+(T080–T082 production environment steps were intentionally not run).
+
+NEXT ACTION:
+1. Review the UI locally (`npm run dev`): dashboard, leads, lead detail,
+   tasks, settings, /lead/<slug>, sign-in, sign-up, and home.
+2. Commit the final UI changes.
+3. Deploy to Vercel (T080/T081).
+4. Run the production smoke test (T082): landing, sign-up/sign-in, public
+   inquiry end to end, dashboard surfaces, mobile layout, 404s.
+5. Clean any demo/test data created during the smoke test (keep the seed
+   dataset intact).
+6. Capture final portfolio screenshots and finish T091 (README with
+   screenshots + demo link).

@@ -35,18 +35,18 @@ export function NoteForm({ leadId }: { leadId: string }) {
         maxLength={4000}
         required
         placeholder="Add a note about this lead…"
-        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-900 focus:outline-none"
+        className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm leading-relaxed text-ink placeholder:text-faint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
       />
       <div className="flex items-center gap-3">
         <button
           type="submit"
           disabled={pending}
-          className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
+          className="inline-flex min-h-9 items-center justify-center rounded-md bg-navy px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-navy-strong disabled:opacity-60"
         >
           {pending ? "Adding…" : "Add note"}
         </button>
         {state.error ? (
-          <span role="alert" className="text-xs text-red-600">
+          <span role="alert" className="text-xs text-danger">
             {state.error}
           </span>
         ) : null}

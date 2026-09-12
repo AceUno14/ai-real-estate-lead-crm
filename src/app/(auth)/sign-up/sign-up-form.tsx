@@ -1,7 +1,9 @@
 "use client";
 
+import { CheckCircle2, Loader2 } from "lucide-react";
 import { useActionState } from "react";
 
+import { PasswordField, TextField } from "@/components/ui/form-field";
 import { signUp, type SignUpState } from "@/server/auth/sign-up";
 
 const initialState: SignUpState = {};
@@ -11,11 +13,26 @@ export function SignUpForm() {
 
   if (state.success) {
     return (
-      <div role="status" className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">        Account created and your workspace is ready. You can now{" "}
-        <a href="/sign-in" className="font-medium underline">
-          sign in
-        </a>{" "}
-        to open your dashboard.
+      <div
+        role="status"
+        className="flex flex-col items-center px-2 py-6 text-center"
+      >
+        <span className="flex size-11 items-center justify-center rounded-full bg-success-soft">
+          <CheckCircle2 className="size-5 text-success" aria-hidden="true" />
+        </span>
+        <p className="mt-3.5 text-base font-semibold text-ink">
+          Workspace ready
+        </p>
+        <p className="mt-1.5 text-sm leading-6 text-muted">
+          Your account and workspace have been created.{" "}
+          <a
+            href="/sign-in"
+            className="font-medium text-navy underline underline-offset-2 hover:text-navy-strong"
+          >
+            Sign in
+          </a>{" "}
+          to open your dashboard.
+        </p>
       </div>
     );
   }
@@ -23,63 +40,58 @@ export function SignUpForm() {
   return (
     <form action={formAction} className="space-y-4">
       {state.error ? (
-        <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p
+          role="alert"
+          className="rounded-md border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-sm font-medium text-danger"
+        >
           {state.error}
         </p>
-        ) : null}
+      ) : null}
 
-      <div>
-        <label htmlFor="name" className="block text-sm font-medium">
-          Name
-        </label>
-        <input
-          id="name"
-          name="name"
-          type="text"
-          autoComplete="name"
-          required
-          maxLength={120}
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-900 focus:outline-none"
-        />
-      </div>
+      <TextField
+        name="name"
+        label="Full name"
+        required
+        autoComplete="name"
+        maxLength={120}
+      />
 
-      <div>
-        <label htmlFor="email" className="block text-sm font-medium">
-          Email
-        </label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          autoComplete="email"
-          required
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-900 focus:outline-none"
-        />
-      </div>
+      <TextField
+        name="email"
+        label="Work email"
+        type="email"
+        required
+        autoComplete="email"
+        maxLength={254}
+      />
 
-      <div>
-        <label htmlFor="password" className="block text-sm font-medium">
-          Password
-        </label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={8}
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-900 focus:outline-none"
-        />
-        <p className="mt-1 text-xs text-slate-500">At least 8 characters.</p>
-      </div>
+      <PasswordField
+        name="password"
+        label="Password"
+        required
+        minLength={8}
+        autoComplete="new-password"
+        helpText="At least 8 characters."
+      />
 
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
+        className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-navy px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-navy-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-10"
       >
-        {pending ? "Creating account…" : "Create account"}
+        {pending ? (
+          <>
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            Creating account…
+          </>
+        ) : (
+          "Create account"
+        )}
       </button>
+      <p className="text-center text-xs leading-5 text-muted">
+        Creating an account sets up your initial real-estate workspace with
+        you as its owner.
+      </p>
     </form>
   );
 }

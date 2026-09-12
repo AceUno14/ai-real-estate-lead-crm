@@ -1,15 +1,56 @@
 @import "tailwindcss";
 
-:root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+/*
+ * Typography: Inter is loaded in src/app/layout.tsx via next/font and
+ * exposed as the --font-inter variable.
+ */
+@theme {
+  --font-sans:
+    var(--font-inter), Inter, ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0b1220;
-    --foreground: #e2e8f0;
-  }
+/*
+ * Design tokens — the single source of truth for color in the app.
+ * Components should use the generated utility classes (bg-surface,
+ * text-ink, border-line, bg-sidebar, ...) instead of raw hex values.
+ */
+@theme {
+  /* Surfaces */
+  --color-background: #f6f5f2; /* warm off-white application background */
+  --color-surface: #ffffff; /* crisp white working surface */
+  --color-surface-muted: #faf9f7; /* inset surface: table heads, hovers */
+
+  /* Text */
+  --color-ink: #1c1917; /* primary foreground */
+  --color-ink-secondary: #44403c; /* strong secondary text */
+  --color-muted: #78716c; /* muted text */
+  --color-faint: #a8a29e; /* faint / meta text */
+
+  /* Borders */
+  --color-line: #e7e5e4; /* subtle neutral border */
+  --color-line-strong: #d6d3d1; /* emphasized border */
+
+  /* Sidebar — deep navy */
+  --color-sidebar: #10233c;
+  --color-sidebar-raised: #17304f; /* hover */
+  --color-sidebar-active: #1c3a5e; /* active route */
+  --color-sidebar-line: #24405f; /* sidebar separators */
+  --color-sidebar-text: #9db1c7;
+  --color-sidebar-text-strong: #eef2f7;
+
+  /* Brand / accent — restrained navy */
+  --color-navy: #16324f;
+  --color-navy-strong: #0e2438;
+  --color-navy-soft: #e9eef4;
+
+  /* Semantic */
+  --color-success: #047857; /* emerald — positive/success */
+  --color-success-soft: #ecfdf5;
+  --color-warning: #b45309; /* amber — attention */
+  --color-warning-soft: #fffbeb;
+  --color-danger: #b91c1c; /* red — urgent/danger only */
+  --color-danger-soft: #fef2f2;
 }
 
 html,
@@ -19,16 +60,40 @@ body {
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    "Helvetica Neue",
-    Arial,
-    sans-serif;
+  color: var(--color-ink);
+  background: var(--color-background);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background-color: var(--color-navy);
+  color: #ffffff;
+}
+
+/*
+ * Accessible focus: a consistent, visible focus ring everywhere.
+ * Use `focus-light` on dark (sidebar) surfaces where the navy ring
+ * would be invisible.
+ */
+:focus-visible {
+  outline: 2px solid var(--color-navy);
+  outline-offset: 2px;
+}
+
+.focus-light:focus-visible {
+  outline-color: var(--color-sidebar-text-strong);
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

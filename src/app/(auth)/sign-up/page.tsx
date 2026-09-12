@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { AuthCard, AuthShell } from "@/components/ui/auth-shell";
+
 import { SignUpForm } from "./sign-up-form";
 
 export const metadata: Metadata = {
@@ -9,24 +11,44 @@ export const metadata: Metadata = {
 
 export default function SignUpPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-semibold">Create account</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Set up your real estate lead workspace.
-        </p>
-
-        <div className="mt-6">
+    <AuthShell
+      brand={
+        <>
+          <div>
+            <p className="text-lg font-semibold tracking-tight text-sidebar-text-strong">
+              Start your workspace
+            </p>
+            <p className="mt-2 max-w-sm text-sm leading-6 text-sidebar-text">
+              Create your account and we&rsquo;ll set up your real-estate
+              workspace — leads, follow-ups, and AI qualification, ready from
+              day one.
+            </p>
+          </div>
+          <p className="text-xs text-sidebar-text">
+            AI Real Estate Lead CRM — sales operations for agents and small
+            teams.
+          </p>
+        </>
+      }
+      card={
+        <AuthCard
+          title="Create account"
+          description="Create your account and we'll set up your real-estate workspace."
+          footer={
+            <>
+              Already have an account?{" "}
+              <Link
+                href="/sign-in"
+                className="font-medium text-navy underline underline-offset-2 hover:text-navy-strong"
+              >
+                Sign in
+              </Link>
+            </>
+          }
+        >
           <SignUpForm />
-        </div>
-
-        <p className="mt-6 text-center text-sm text-slate-500">
-          Already have an account?{" "}
-          <Link href="/sign-in" className="font-medium text-slate-900 underline">
-            Sign in
-          </Link>
-        </p>
-      </div>
-    </main>
+        </AuthCard>
+      }
+    />
   );
 }

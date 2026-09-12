@@ -358,6 +358,27 @@ All queries must be organization scoped.
 
 Status: [x]
 
+UI Phase 2 note (lead detail redesign, no behavior changes): the page is
+now the strongest workflow surface. A lead header leads with the name,
+received context, status/priority/score/assignment strip, and the
+status/assignment actions; HIGH/URGENT leads get an amber/red accent bar
+(plus a red "Urgent" chip on URGENT only). Contact & inquiry is a
+compact scannable card (icon contact block, emphasized budget/timeline/
+financing/location, remaining context, then the message). AI
+qualification is the central intelligence panel: score/100 with a color-
+coded meter, confidence, priority badge, summary, four signal fields, a
+prominent "Recommended next action" callout, and the labeled AI draft
+review area (Save edit / Approve / Reject, generated/edited/approved/
+rejected states visible). Pending, failed-with-retry, and not-qualified
+states are distinguished and calm. Follow-up tasks distinguish overdue
+(red) vs due-soon (amber) vs later, show completed state, and keep
+manual creation. Activity is a proper timeline with per-type markers
+(created, qualification, auto follow-up, hot-lead notification, notes,
+status, draft review) and relative timestamps. Notes got a comfortable
+composer and scannable cards. Desktop is a 2/3 main + 1/3 right-rail
+grid; mobile is a single column with 44px controls and no overflow.
+All display queries, mutations, and tenant scoping are unchanged.
+
 Display:
 
 - lead profile
@@ -729,6 +750,73 @@ Avoid unrelated refactors.
 Status: [x]
 
 Progress note: accessible labels on all form fields, native focus states, responsive grids/sidebar, overflow-safe tables, loading/empty/error states on dashboard pages, truncated long text. Real-device pass recommended during deployment smoke test (T082).
+
+UI sprint note (design refresh, no behavior changes): token-based design
+system added in `src/app/globals.css` (Tailwind v4 `@theme`: background,
+surface, ink/muted text, line borders, deep-navy sidebar palette, navy
+accent, success/warning/danger semantics) with Inter via next/font. The
+dashboard shell now uses a fixed navy sidebar with icon navigation,
+workspace identity, and an account footer; mobile gets a compact navy
+header with an accessible drawer (Escape closes, focus returns, scroll
+locked). The dashboard leads with an attention area (urgent / high
+priority / follow-ups due) and a ranked "Who should I contact first?"
+list; the leads screen gained a cleaner toolbar, denser table with
+row-span clickable links, score meters, a mobile card list, and a useful
+empty state. Loading skeletons and the dashboard error state were moved
+to the new tokens. lucide-react added as the only new dependency. Lead
+detail, sign-in/sign-up, public inquiry form, and the marketing page are
+intentionally unchanged (later UI phases). All checks pass: typecheck,
+lint, 116 tests, production build.
+
+UI Phase 2 note (lead detail redesign): lead detail rebuilt on the same
+token system — see the T042 note above. All checks pass: typecheck,
+lint, 116 tests, production build; the page was also smoke-tested from
+the production build (sign-in → lead list → lead detail render, pending
+and qualified states, unauthenticated 307).
+
+UI Phase 3 note (public + auth redesign, no behavior changes): the public
+inquiry page (`/lead/[organizationSlug]`) is now a two-column premium layout —
+navy brand panel with brokerage name, headline, supporting copy, and three
+trust points (icons only, no fake claims) beside a white form card; it
+collapses to a single column on mobile with a compact brokerage chip. The
+lead form groups fields into Contact / Property goal / Budget & readiness /
+Details sections using new shared primitives (`src/components/ui/
+form-field.tsx`: consistent 44px→40px controls, select styling, helper text,
+error wiring, show/hide password field) and a navy full-width CTA with a
+spinner pending state. The success state is a polished confirmation panel
+(success icon, "Inquiry received", what-happens-next steps, brokerage
+context, no response-time promise). Sign-in/sign-up were rebuilt on new
+shared `AuthShell`/`AuthCard` components (`src/components/ui/auth-shell.tsx`)
+with a quiet navy brand panel, welcome-back copy, professional error states,
+and sign-up copy explaining automatic workspace provisioning. Field values,
+Zod validation, the server-bound slug, provisioning, and all server behavior
+are unchanged. All checks pass: typecheck, lint, 116 tests, production build;
+smoke-tested from the production build (sign-in/sign-up/lead 200, unknown
+slug 404, unauthenticated /dashboard 307).
+
+UI Phase 4 note (final polish, no behavior changes): the /tasks page is now
+a workflow surface — compact pending/overdue/due-soon count chips, pending
+tasks ranked overdue → due-within-24h → future (overdue rows carry a red
+accent bar and soft background), a useful empty state explaining automatic
+task creation, and a quieter completed section; the last text-slate-400
+remnant was removed and TaskToggle meets the 44px mobile touch target.
+/settings is now a polished read-only overview with Workspace / Account /
+Public inquiry page sections (workspace name, slug, role chip, member
+name/email, and the server-derived public lead URL with an open link —
+NEXT_PUBLIC_APP_URL, no secrets). The marketing home page is a concise
+portfolio landing page: hero ("Know which lead to contact first."), the
+actual implemented workflow chain (inquiry → AI qualification → score +
+priority → recommended action → follow-up task → hot-lead email → human
+review), features limited to what exists (workspace-specific capture, AI
+qualification, ranking, tasks, email alerts, notes/activity, tenant
+isolation), and a server-side auth-aware primary CTA (Open dashboard vs
+Sign in) with the secondary "Submit a test inquiry" CTA. The
+/no-organization fallback was migrated off the old palette. A consistency
+audit found zero remaining slate-*/raw-hex/old-palette classes (all other
+matches were translate-* false positives). All checks pass: typecheck,
+lint, 116 tests, production build; production-render smoke test: /,
+/sign-in, /sign-up, /lead/demo-realty 200, unknown slug 404,
+unauthenticated /dashboard /tasks /settings 307.
 
 Check:
 

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { AuthCard, AuthShell } from "@/components/ui/auth-shell";
+
 import { SignInForm } from "./sign-in-form";
 
 export const metadata: Metadata = {
@@ -9,24 +11,43 @@ export const metadata: Metadata = {
 
 export default function SignInPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-semibold">Sign in</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Access your real estate lead workspace.
-        </p>
-
-        <div className="mt-6">
+    <AuthShell
+      brand={
+        <>
+          <div>
+            <p className="text-lg font-semibold tracking-tight text-sidebar-text-strong">
+              Welcome back
+            </p>
+            <p className="mt-2 max-w-sm text-sm leading-6 text-sidebar-text">
+              Sign in to manage leads, follow-ups, and AI-qualified
+              opportunities.
+            </p>
+          </div>
+          <p className="text-xs text-sidebar-text">
+            AI Real Estate Lead CRM — sales operations for agents and small
+            teams.
+          </p>
+        </>
+      }
+      card={
+        <AuthCard
+          title="Sign in"
+          description="Welcome back. Sign in to your lead workspace."
+          footer={
+            <>
+              No account yet?{" "}
+              <Link
+                href="/sign-up"
+                className="font-medium text-navy underline underline-offset-2 hover:text-navy-strong"
+              >
+                Create one
+              </Link>
+            </>
+          }
+        >
           <SignInForm />
-        </div>
-
-        <p className="mt-6 text-center text-sm text-slate-500">
-          No account yet?{" "}
-          <Link href="/sign-up" className="font-medium text-slate-900 underline">
-            Create one
-          </Link>
-        </p>
-      </div>
-    </main>
+        </AuthCard>
+      }
+    />
   );
 }

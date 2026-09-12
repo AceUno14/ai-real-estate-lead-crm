@@ -27,12 +27,13 @@ export function TaskToggle({
       <button
         type="submit"
         disabled={pending}
-        className="rounded-md border border-slate-300 px-2 py-0.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-60"
+        aria-label={completed ? `Reopen task` : "Complete task"}
+        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-line-strong bg-surface px-2.5 text-xs font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-60 md:min-h-9"
       >
         {pending ? "…" : completed ? "Reopen" : "Complete"}
       </button>
       {state.error ? (
-        <span role="alert" className="text-xs text-red-600">
+        <span role="alert" className="text-xs text-danger">
           {state.error}
         </span>
       ) : null}

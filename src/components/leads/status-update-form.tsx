@@ -23,7 +23,7 @@ export function StatusUpdateForm({
   );
 
   return (
-    <form action={formAction} className="flex items-center gap-2">
+    <form action={formAction} className="flex flex-wrap items-center gap-2">
       <input type="hidden" name="leadId" value={leadId} />
       <label htmlFor="status" className="sr-only">
         Status
@@ -32,7 +32,7 @@ export function StatusUpdateForm({
         id="status"
         name="status"
         defaultValue={currentStatus}
-        className="rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-900 focus:outline-none"
+        className="h-9 rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
       >
         {LEAD_STATUSES.map((status) => (
           <option key={status} value={status}>
@@ -43,12 +43,12 @@ export function StatusUpdateForm({
       <button
         type="submit"
         disabled={pending}
-        className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
+        className="inline-flex h-9 items-center rounded-md bg-navy px-3.5 text-sm font-medium text-white transition-colors hover:bg-navy-strong disabled:opacity-60"
       >
         {pending ? "Saving…" : "Update"}
       </button>
       {state.error ? (
-        <span role="alert" className="text-xs text-red-600">
+        <span role="alert" className="text-xs text-danger">
           {state.error}
         </span>
       ) : null}

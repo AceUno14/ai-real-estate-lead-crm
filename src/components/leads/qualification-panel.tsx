@@ -11,6 +11,11 @@ import {
 
 const initialState: QualifyState = {};
 
+const primaryButtonClasses =
+  "inline-flex min-h-9 items-center justify-center rounded-md bg-navy px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-navy-strong disabled:opacity-60";
+const secondaryButtonClasses =
+  "inline-flex min-h-9 items-center justify-center rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-60";
+
 export function RunQualificationButton({ leadId }: { leadId: string }) {
   const [state, formAction, pending] = useActionState(
     runQualification,
@@ -18,17 +23,17 @@ export function RunQualificationButton({ leadId }: { leadId: string }) {
   );
 
   return (
-    <form action={formAction} className="mt-4 space-y-2">
+    <form action={formAction} className="space-y-2">
       <input type="hidden" name="leadId" value={leadId} />
       <button
         type="submit"
         disabled={pending}
-        className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
+        className={primaryButtonClasses}
       >
         {pending ? "Qualifying…" : "Run AI qualification"}
       </button>
       {state.error ? (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {state.error}
         </p>
       ) : null}
@@ -59,13 +64,21 @@ export function DraftReviewForm({
   const locked = reviewState === "APPROVED" || reviewState === "REJECTED";
 
   return (
-    <div className="mt-4 space-y-3">
+    <div className="space-y-3">
       <form action={editAction} className="space-y-2">
         <input type="hidden" name="qualificationId" value={qualificationId} />
         <input type="hidden" name="leadId" value={leadId} />
-        <label htmlFor="draft-reply" className="block text-xs font-medium text-slate-500">
-          Draft reply ({reviewState.toLowerCase()})
-        </label>
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <label
+            htmlFor="draft-reply"
+            className="text-[11px] font-medium uppercase tracking-wide text-faint"
+          >
+            AI draft reply
+          </label>
+          <span className="text-[11px] font-medium uppercase tracking-wide text-faint">
+            AI-generated · review state: {reviewState.toLowerCase()}
+          </span>
+        </div>
         <textarea
           id="draft-reply"
           name="draftReply"
@@ -73,26 +86,26 @@ export function DraftReviewForm({
           maxLength={8000}
           defaultValue={draftReply}
           disabled={locked}
-          className="w-full rounded-md border border-slate-300 px-3 py-2 font-sans text-sm focus:border-slate-900 focus:outline-none disabled:bg-slate-50 disabled:text-slate-500"
+          className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 font-sans text-sm leading-relaxed text-ink placeholder:text-faint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy disabled:bg-surface-muted disabled:text-muted"
         />
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="submit"
             disabled={editPending || locked}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-60"
+            className={secondaryButtonClasses}
           >
             {editPending ? "Saving…" : "Save edit"}
           </button>
+          {editState.error ? (
+            <span role="alert" className="text-xs text-danger">
+              {editState.error}
+            </span>
+          ) : null}
         </div>
-        {editState.error ? (
-          <p role="alert" className="text-xs text-red-600">
-            {editState.error}
-          </p>
-        ) : null}
       </form>
 
       {!locked ? (
-        <form action={reviewAction} className="flex items-center gap-2">
+        <form action={reviewAction} className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="qualificationId" value={qualificationId} />
           <input type="hidden" name="leadId" value={leadId} />
           <button
@@ -100,7 +113,7 @@ export function DraftReviewForm({
             name="reviewState"
             value="APPROVED"
             disabled={reviewPending}
-            className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
+            className="inline-flex min-h-9 items-center justify-center rounded-md bg-success px-3 py-1.5 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-60"
           >
             Approve draft
           </button>
@@ -109,18 +122,18 @@ export function DraftReviewForm({
             name="reviewState"
             value="REJECTED"
             disabled={reviewPending}
-            className="rounded-md border border-red-200 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+            className="inline-flex min-h-9 items-center justify-center rounded-md border border-danger/30 bg-surface px-3 py-1.5 text-sm font-medium text-danger transition-colors hover:bg-danger-soft disabled:opacity-60"
           >
             Reject draft
           </button>
           {reviewStateResult.error ? (
-            <span role="alert" className="text-xs text-red-600">
+            <span role="alert" className="text-xs text-danger">
               {reviewStateResult.error}
             </span>
           ) : null}
         </form>
       ) : (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted">
           Review complete — this draft was {reviewState.toLowerCase()}.
           Outbound messaging is not part of the MVP.
         </p>
