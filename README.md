@@ -1,162 +1,116 @@
-# AI Real Estate Lead CRM
+# Lead Estate — AI Real Estate Lead CRM
 
-AI Real Estate Lead CRM is an AI-assisted lead management application designed for real estate agents and small real-estate teams.
+A production-deployed AI-assisted CRM for real estate agents and small teams. Lead Estate captures property inquiries, automatically qualifies each lead, ranks sales opportunities, creates follow-up tasks for high-value leads, and sends hot-lead email alerts so agents know who to contact first.
 
-The application captures property inquiries, organizes them inside a CRM, analyzes each lead with AI, assigns a lead score and priority, recommends the next sales action, and creates a draft response for human review.
+**Live app:** https://ai-real-estate-lead-crm.vercel.app  
+**Public inquiry demo:** https://ai-real-estate-lead-crm.vercel.app/lead/esmael-realty
 
-## CORE WORKFLOW
+> Portfolio project built around a practical sales problem: incoming real-estate leads do not have equal value, and agents need a fast way to identify the opportunities most likely to convert.
 
-Workspace-specific public lead
-→ persistence
-→ successful visitor response
-→ automatic AI qualification
-→ lead score / priority / intent / recommended next action / draft reply
-→ HIGH / URGENT lead → automatic follow-up task
-→ HIGH / URGENT lead → agent email notification (Resend)
-→ human review and action
-→ dashboard ranking and task workflow
-→ lead status update
+## Product workflow
 
-AI qualification also remains available manually from the lead detail page,
-which is the fallback whenever the provider is unavailable or rate limited.
-High-value leads (HIGH / URGENT) automatically receive one follow-up task so
-they appear in the task workflow without the agent remembering to create one,
-and the responsible agent is emailed so the lead is not missed.
-
-## BUSINESS PROBLEM
-
-Real estate agents often receive leads from:
-
-- websites
-- advertisements
-- social media
-- referrals
-- property portals
-- manual inquiries
-
-Not every lead has the same value.
-
-Agents may spend too much time manually reviewing inquiries and deciding:
-
-- Who should I contact first?
-- Which lead is ready to buy?
-- Which lead has financing?
-- Which lead has an urgent timeline?
-- Which lead should be nurtured?
-- What should I say when I respond?
-
-## SOLUTION
-
-AI Real Estate Lead CRM helps agents organize and prioritize incoming leads.
-
-AI analyzes each lead and produces structured sales intelligence such as:
-
-- lead score
-- priority
-- buying intent
-- summary
-- purchase timeline
-- budget readiness
-- financing status
-- recommended next action
-- suggested reply
-- confidence
-
-The agent remains in control.
-
-AI-generated responses are reviewed by a human before they can be used.
-
-## TARGET USERS
-
-Primary:
-
-- solo real estate agents
-- small real-estate teams
-- brokers
-- real-estate lead-generation agencies
-
-Secondary:
-
-- property developers
-- rental teams
-- property management companies
-
-## MVP FEATURES
-
-### Authentication
-
-- user authentication
-- protected dashboard
-- secure session handling
-
-### Workspace Isolation
-
-- organizations
-- memberships
-- OWNER role
-- MEMBER role
-- self-service sign-up provisions the first workspace with OWNER membership
-- workspace-scoped CRM data
-- server-side authorization
-
-### Public Lead Capture
-
-Public lead capture is workspace-specific: each organization has its own public
-form URL.
-
-```
-/lead/[organizationSlug]      e.g. /lead/demo-realty
+```text
+Public property inquiry
+        ↓
+Lead saved to the correct workspace
+        ↓
+Automatic AI qualification
+        ↓
+Score + priority + intent + summary
+        ↓
+Recommended next action + draft reply
+        ↓
+HIGH / URGENT → automatic follow-up task
+        ↓
+HIGH / URGENT → hot-lead email notification
+        ↓
+Human review, outreach, notes, and status updates
 ```
 
-The workspace is resolved from the slug entirely server-side, and unknown slugs
-return a 404. The legacy `/lead` route redirects to the configured default
-workspace (`PUBLIC_LEAD_ORG_SLUG`). See DECISIONS.md D-027.
+The CRM remains usable if the AI provider is unavailable. Lead capture is persisted first, AI qualification runs afterward, and manual qualification remains available as a fallback.
 
-Collect:
+## Screenshots
 
-- name
-- email
-- phone
-- inquiry type
-- property type
-- preferred location
-- budget
-- timeline
-- financing status
-- message
-- source
+### AI-prioritized lead pipeline
+
+![AI-prioritized lead list](portfolio/screenshots/01-leads.png)
+
+Leads are ranked using structured AI qualification. The demo dataset intentionally includes different levels of sales readiness, from a LOW-score exploratory lead to HIGH and URGENT purchase-ready opportunities.
+
+### Sales dashboard
+
+![Sales dashboard](portfolio/screenshots/02-dashboard.png)
+
+The dashboard surfaces urgent leads, high-priority opportunities, follow-ups due, average AI score, contact-first ranking, status distribution, and recent activity.
+
+### Lead intelligence and action workflow
+
+![Lead detail with AI qualification](portfolio/screenshots/03-lead-detail.png)
+
+Each lead has contact and inquiry details, AI score and confidence, priority, structured qualification, recommended next action, draft reply, follow-up tasks, and an activity timeline.
+
+### Workspace-specific public inquiry form
+
+![Public property inquiry form](portfolio/screenshots/04-public-inquiry.png)
+
+Each organization has its own public lead-capture route. The workspace is resolved server-side from the URL slug so the browser never chooses an organization ID directly.
+
+### Hot-lead email alert
+
+![Hot-lead email notification](portfolio/screenshots/05-hot-lead-email.png)
+
+HIGH and URGENT leads trigger a best-effort email notification with the qualification summary and a direct link back to the CRM.
+
+## What problem it solves
+
+Real estate agents may receive leads from websites, social media, referrals, advertisements, and property portals. Reviewing every inquiry manually creates delay and makes it easy to miss the strongest opportunities.
+
+Lead Estate turns an incoming inquiry into actionable sales intelligence:
+
+- **AI score** from 0–100
+- **Priority**: LOW, MEDIUM, HIGH, or URGENT
+- **Intent** and concise lead summary
+- **Timeline**, budget readiness, and financing status
+- **Recommended next action**
+- **AI-generated draft reply** for human review
+- **Automatic follow-up task** for HIGH / URGENT leads
+- **Email alert** for HIGH / URGENT leads
+
+The goal is not autonomous sales. The AI helps prioritize and prepare; the agent stays in control.
+
+## Core features
+
+### Multi-tenant authentication and workspaces
+
+- Credentials authentication with protected application routes
+- Organization and membership model
+- OWNER and MEMBER roles
+- Self-service sign-up provisions the user's initial workspace
+- Server-side tenant isolation for workspace-owned CRM records
+
+### Public lead capture
+
+- Workspace-specific route: `/lead/[organizationSlug]`
+- Unknown workspace slugs return 404
+- Name, email, phone, inquiry type, property type, location, budget, timeline, financing, message, and source
+- Lead persistence is not dependent on AI availability
+- Automatic AI qualification runs after successful submission
 
 ### Lead CRM
 
-- lead list
-- lead detail
-- search
-- filters
-- sorting
-- status management
-- notes
-- follow-up tasks
-- activity history
+- Lead list and lead detail views
+- Search, filtering, and sorting
+- Lead status workflow: `NEW`, `CONTACTED`, `QUALIFIED`, `NURTURING`, `WON`, `LOST`
+- Assignment
+- Notes
+- Follow-up tasks
+- Activity history
 
-### Lead Statuses
+### AI qualification
 
-- NEW
-- CONTACTED
-- QUALIFIED
-- NURTURING
-- WON
-- LOST
+The AI provider returns structured, validated output containing:
 
-### AI Qualification
-
-Qualification runs automatically after a public lead is safely persisted, using
-Next.js `after()` so the visitor is never kept waiting on the AI. The manual
-"Run AI qualification" button stays available and is the fallback when the
-provider fails or is rate limited.
-
-AI returns:
-
-- score from 0 to 100
+- score
 - priority
 - intent
 - summary
@@ -167,325 +121,159 @@ AI returns:
 - draft reply
 - confidence
 
-Priority levels:
-
-- LOW
-- MEDIUM
-- HIGH
-- URGENT
+Provider failures, malformed output, timeouts, or rate limits do not delete or invalidate the lead. Failed qualification attempts are recorded and can be retried manually.
 
-Failure handling: AI failure, timeout, provider outage, malformed output, or
-HTTP 429 never fails the lead submission and never modifies the lead. A failed
-qualification is recorded in the activity timeline, and the lead detail page
-shows whether qualification is pending or has failed with retry available.
-HTTP 429 retries are bounded (at most one retry, `Retry-After` respected) so a
-free provider quota is never burned.
+### Automatic follow-up tasks
 
-### Automatic Follow-Up Tasks
+When qualification succeeds:
 
-When qualification succeeds with HIGH or URGENT priority, exactly one follow-up
-task is created automatically and appears in `/tasks` and on the lead detail
-page, ready for the agent to complete or reopen.
+- **HIGH** → follow-up task due in 24 hours
+- **URGENT** → urgent follow-up task due in 2 hours
+- LOW / MEDIUM → no automatic task
+- repeated qualification does not create duplicate automatic tasks
 
-- HIGH: due in 24 hours, titled `Follow up with <lead name>`
-- URGENT: due in 2 hours, titled `Urgent follow-up with <lead name>`
-- the description uses the AI recommended action
-- LOW / MEDIUM create no automatic task
-- server time is used consistently; no client timezone system
-- one automatic task per lead (repeated qualification cannot duplicate it)
-- a task-creation failure never removes the qualification or the lead, and
-  manual task creation stays available
+### Hot-lead email notifications
 
-### Hot-Lead Email Notifications
+For HIGH / URGENT leads:
 
-When a HIGH or URGENT qualification succeeds, the responsible CRM user is
-emailed through Resend.
+- notification is sent through Resend
+- assigned user is preferred when valid for the workspace
+- otherwise OWNER member(s) receive the alert
+- notifications are idempotent per qualification
+- email failure never breaks lead capture or qualification
 
-- recipient rule (server-side only): the assigned user when they belong to the
-  lead's organization, otherwise the organization's OWNER member(s)
-- recipients are never taken from a global env var or from the client
-- one notification per qualification (Activity ledger + Resend idempotency key)
-- email is best-effort: a failure never affects the lead, qualification,
-  follow-up task, or submission, and is recorded in the activity timeline
-- configured with `RESEND_API_KEY` and `RESEND_FROM_EMAIL`; when unset, no email
-  is sent and the CRM keeps working
+### Human review
 
-### Human Review
+AI draft responses support the states:
 
-Draft review states:
+- `GENERATED`
+- `EDITED`
+- `APPROVED`
+- `REJECTED`
 
-- GENERATED
-- EDITED
-- APPROVED
-- REJECTED
+No outbound customer reply is sent automatically by the MVP.
 
-### Dashboard
+## Tech stack
 
-Dashboard should show:
+| Area | Technology |
+| --- | --- |
+| Framework | Next.js 16 App Router |
+| UI | React 19, Tailwind CSS 4, Lucide React |
+| Language | TypeScript |
+| Authentication | NextAuth credentials flow |
+| Database | PostgreSQL on Neon |
+| ORM | Prisma 7 + `@prisma/adapter-pg` |
+| Validation | Zod |
+| AI | Configurable OpenAI-compatible provider abstraction |
+| Email | Resend |
+| Testing | Vitest |
+| Deployment | Vercel |
 
-- total leads
-- new leads
-- high-priority leads
-- urgent leads
-- average AI score
-- follow-ups due
-- leads by status
-- recent activity
-- leads that should be contacted first
+## Architecture
 
-## TECHNOLOGY STACK
+The project uses a modular monolith structure with clear separation between presentation, server actions/routes, application services, validation, authentication, database access, and AI qualification.
 
-Planned stack:
+A central architectural rule is that the **CRM is the primary system and AI is an enhancement**. The application is designed so that lead capture and normal CRM operations continue even when the model provider is unavailable.
 
-- Next.js App Router
-- TypeScript
-- Tailwind CSS
-- PostgreSQL
-- Prisma ORM
-- Zod
-- Next.js-compatible authentication
-- Server Actions and/or Route Handlers
-- AI provider abstraction
-- Neon PostgreSQL
-- Vercel
+### Tenant isolation
 
-## ARCHITECTURE
+Workspace-owned records carry `organizationId`, including:
 
-The project uses a modular monolith architecture.
+- `Lead`
+- `LeadQualification`
+- `LeadNote`
+- `FollowUpTask`
+- `Activity`
 
-Main layers:
+Protected operations enforce workspace membership server-side. Public lead capture uses the organization slug in the route and resolves it to a trusted organization server-side; client-supplied organization IDs are not trusted.
 
-- presentation
-- server actions/API
-- application services
-- domain schemas
-- database
-- authentication
-- AI qualification
+## Production verification
 
-The CRM is the primary system.
+The deployed application has been verified end-to-end on Vercel with Neon PostgreSQL and Resend:
 
-AI is an enhancement.
+```text
+Public inquiry submitted
+→ lead persisted to Esmael Realty
+→ automatic AI qualification completed
+→ score and URGENT priority persisted
+→ recommended next action generated
+→ draft reply generated
+→ automatic urgent follow-up task created
+→ hot-lead notification sent
+→ Gmail delivery confirmed
+```
 
-If the AI provider becomes unavailable, CRM functionality should continue working.
+The production build also passed TypeScript, ESLint, build verification, route smoke testing, authentication checks, tenant-isolation tests, CRM mutation tests, AI failure/retry tests, and the project's **116-test baseline**.
 
-## MULTI-TENANT SECURITY
+## Run locally
 
-Every organization owns its own CRM data.
-
-Protected records are scoped using organizationId.
-
-Examples:
-
-- Lead
-- LeadQualification
-- LeadNote
-- FollowUpTask
-- Activity
-
-Authorization is enforced server-side.
-
-The application must never trust a browser-provided organization ID by itself.
-
-Public lead capture is addressed by workspace slug, never by organization ID:
-the slug in `/lead/[organizationSlug]` is resolved to a trusted `organizationId`
-server-side, and any client-supplied `organizationId` is ignored.
-
-AI must never make authentication or authorization decisions.
-
-## AI DESIGN
-
-The application uses an AI provider abstraction.
-
-This allows the runtime AI provider to change without rewriting CRM business logic.
-
-Development begins with a deterministic mock AI provider.
-
-Benefits:
-
-- no AI API cost during early development
-- predictable testing
-- easy UI development
-- reliable demo data
-- easy AI failure testing
-
-Later, an OpenAI-compatible provider can be added.
-
-## CODING AI
-
-Primary coding AI:
-
-DeepSeek V4 Flash
-
-Fallback / escalation AI:
-
-GLM 5.3 Flash
-
-DeepSeek V4 Flash is used for most implementation work.
-
-GLM 5.3 Flash should only be used when deeper reasoning is necessary, such as:
-
-- difficult authentication problems
-- tenant-isolation issues
-- security-sensitive bugs
-- difficult multi-layer debugging
-- independent architecture review
-
-Do not switch models unnecessarily.
-
-## CODING AI PRIVACY
-
-Never send a coding model:
-
-- API keys
-- passwords
-- authentication secrets
-- raw .env values
-- production customer information
-- real lead PII
-- private client documents
-- proprietary secrets
-
-Use sanitized or fictional development data.
-
-## DEVELOPMENT DOCUMENTATION
-
-Important files:
-
-AI_CONTEXT.md
-
-Defines:
-- project scope
-- features
-- AI rules
-- security rules
-- development rules
-
-ARCHITECTURE.md
-
-Defines:
-- application structure
-- layers
-- request flows
-- tenancy
-- AI architecture
-
-DECISIONS.md
-
-Records:
-- architecture decisions
-- product decisions
-- development decisions
-
-TASKS.md
-
-Defines:
-- ordered implementation plan
-- project phases
-- current next task
-
-.env.example
-
-Documents:
-- required environment variables
-- database configuration
-- authentication configuration
-- AI provider configuration
-
-SESSION_REPORT.md
-
-Records:
-- verification results for the current session
-- defects found and fixed
-- task status reconciliation
-- blockers and next actions
-
-## DEVELOPMENT PRINCIPLES
-
-- one bounded task at a time
-- use the smallest correct implementation
-- server-side workspace isolation
-- strict validation
-- structured AI output
-- human review before messaging
-- minimal dependencies
-- no premature integrations
-- no secrets committed
-- fictional demo data only
-- avoid unrelated refactors
-
-## NON-GOALS FOR MVP
-
-The initial MVP will not include:
-
-- MLS integration
-- Zillow scraping
-- Realtor.com scraping
-- automatic SMS
-- automatic email
-- voice calling
-- calendar booking
-- billing
-- advanced automation
-- RAG
-- vector database
-- autonomous agents
-- complex analytics
-
-These can be considered after the core CRM is complete.
-
-## DEPLOYMENT TARGET
-
-Application:
-
-Vercel
-
-Database:
-
-Neon PostgreSQL
-
-Runtime AI:
-
-Configurable provider
-
-## CURRENT STATUS
-
-Implemented and verified through Phase 7 (dashboard insights) plus automatic AI
-qualification on public lead capture: Next.js 16 + Prisma 7 foundation,
-credentials authentication, self-service workspace provisioning on sign-up,
-organization/tenant isolation, workspace-specific public lead capture
-(`/lead/[organizationSlug]`) with automatic post-response AI qualification and
-automatic follow-up tasks and Resend email notifications for HIGH/URGENT
-leads, lead CRM (list/detail/status/notes/tasks), AI qualification with mock
-provider + human review, dashboard metrics and contact-first ranking, and a
-116-test baseline.
-
-The initial migration is applied and verified against the configured PostgreSQL/Neon database, and the seed has been run. Verification covers: migration state in sync, idempotent seed, authentication round trip, organization/tenant isolation and cross-tenant rejection, public lead persistence, lead list/detail rendering from persisted records, status/notes/follow-up-task/activity mutations, and mock AI qualification success, failure recovery, and human review.
-
-Still open (see TASKS.md): production database (T080), Vercel deployment (T081), production smoke test (T082), and the deployment-dependent parts of the final README (T091).
-
-### RUN LOCALLY
+### 1. Install dependencies
 
 ```bash
-# 1. Configure environment (never commit secrets)
-cp .env.example .env      # set DATABASE_URL and AUTH_SECRET (and optionally RESEND_API_KEY / RESEND_FROM_EMAIL)
+npm install
+```
 
-# 2. Apply migrations and seed fictional demo data
+### 2. Configure environment
+
+Copy the example environment file and provide your own values. Never commit real secrets.
+
+```bash
+cp .env.example .env
+```
+
+Core configuration includes database and auth settings, plus optional runtime AI and Resend settings.
+
+### 3. Apply the database migration and seed fictional demo data
+
+```bash
 npx prisma migrate dev
 npm run db:seed
+```
 
-# 3. Start the app
+### 4. Start development
+
+```bash
 npm run dev
 ```
 
-The seed creates the fictional organization `demo-realty` and a demo owner (`owner@demo-realty.test`). The seed script prints the demo password on completion; all seeded people and inquiries are fictional. Sign in at `/sign-in`, or submit a public inquiry at `/lead/demo-realty` (the legacy `/lead` route redirects there).
-
-Accounts created at `/sign-up` automatically receive their own real-estate workspace with an OWNER membership, so a new user can reach the dashboard immediately without waiting for an invitation.
-
-Useful checks:
+Useful verification commands:
 
 ```bash
 npm run typecheck
 npm run lint
 npm test
+npm run build
 ```
+
+## Project documentation
+
+The repository includes additional engineering documentation:
+
+- `AI_CONTEXT.md` — project scope, AI rules, and implementation constraints
+- `ARCHITECTURE.md` — application layers, request flows, tenancy, and AI architecture
+- `DECISIONS.md` — architecture and product decisions
+- `TASKS.md` — implementation plan and project phases
+- `SESSION_REPORT.md` — verification notes and completed work
+- `.env.example` — documented environment configuration
+
+## MVP boundaries
+
+The current product intentionally does **not** include:
+
+- MLS or property-portal integrations
+- automated SMS
+- automatic customer email replies
+- voice calling
+- calendar booking
+- billing
+- RAG / vector search
+- autonomous agents
+- advanced analytics
+
+These are potential future extensions, not claims of the current build.
+
+## Status
+
+**Production deployed and end-to-end verified.**
+
+The implemented MVP includes multi-tenant authentication, workspace-specific public lead capture, automatic AI qualification, lead scoring and prioritization, human-reviewed AI drafts, automatic high-value follow-up tasks, hot-lead email alerts, CRM notes/activity/status management, and dashboard contact-first ranking.
